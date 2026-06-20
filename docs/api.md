@@ -48,10 +48,12 @@ Login/session id:
 - `get_verbrauch`: non-tenant consumption overview.
 - `get_mtr_vb_overview`: tenant/meter consumption overview.
 - `get_mtr_verbrauch`: meter consumption series.
-- `get_mtr_vbmed`: consumption by medium.
+- `get_mtr_vbmed`: consumption by medium, including 14h quarter-hour fields
+  when `s_datum=YYYY-MM-DD`.
 - `get_mtr_hist`: historical consumption card.
 - `get_mtr_autarkie`: self-sufficiency/autarky card.
-- `get_mtr_eb`: energy balance.
+- `get_mtr_eb`: energy balance, including the best observed grid/PV 15-minute
+  split when `s_datum=YYYY-MM-DD`.
 - `get_mtr_lzs`: latest meter readings. This is the first Energy Dashboard
   source because it exposes reading values and units.
 - `get_mtr_inv`: invoices.
@@ -90,16 +92,33 @@ Login/session id:
 
 - `data[0]`: `_vb_vll_vy`, `_vb_vll_ly`, `_vb_x`, `_vb_ttl`, `_vb_eh`.
 
+`get_mtr_eb` daily 15-minute view:
+
+- Request with `s_datum=YYYY-MM-DD`.
+- `data[0]._lvb_lbl_14h`: 96 labels from `00:15` through next-day `00:00`.
+- `data[0]._lvb_ttl`: `Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug`.
+- `data[0]._lvb_vll_14h`: semicolon-separated interval-kWh series matching
+  `_lvb_ttl`. For one row, average kW is `interval_kWh * 4`.
+- Observed 2026-06-19 totals from this endpoint: total 34.966 kWh, grid
+  19.399199 kWh, solar/object 16.690709 kWh, battery 0 kWh.
+
 `get_verbrauch`:
 
 - `vb_vy[]`, `vb_ly[]`, `vb_x[]` with `v01` through `v12`.
 - `vb_leg[]`: `VJ`, `LJ`.
 - `vb_eh`: unit.
 
-`get_mtr_eb`, `get_mtr_vbmed`, `get_mtr_hist`, and `get_mtr_autarkie` return
-card-oriented JSON fields such as `_vb_vll`, `_lvb_vll`, `_ez_vll`, labels,
-units, colors, and 14h variants. These are useful for dashboards but should not
-be mapped to Energy Dashboard totals until their semantics are validated live.
+`get_mtr_vbmed` daily 15-minute view:
+
+- Request with `s_datum=YYYY-MM-DD`.
+- The observed `_hvb_vll_14h` and `_hvbt2r_vll_14h` fields contained total
+  quarter-hour consumption, but tariff split series were zero in this endpoint.
+  Prefer `get_mtr_eb` for split grid/solar 15-minute analysis.
+
+`get_mtr_hist` and `get_mtr_autarkie` return card-oriented JSON fields such as
+labels, units, colors, and chart values. These are useful for dashboards but
+should not be mapped to Energy Dashboard totals until their semantics are
+validated live.
 
 ## Local Testing
 
@@ -144,9 +163,15 @@ OpenAPI reference: [openapi-web-observed.yaml](openapi-web-observed.yaml).
   request bodies.
 - `GET /astra04/readyxnet/source/pm/pm_repeaverbr.php`: report page. Observed
   variants include `Report=2`, `Report=3`, and `Report=4`, with `s_year`,
-  optional `s_fday`, and optional `s_rmnt`.
+  optional `s_fday`, optional `s_rmnt`, `s_eh`, `s_gtz`, and `MWSTENB`.
+  The page contains a `Preis` column, but all observed variants had blank price
+  cells; `MWSTENB=1` did not populate tariff values.
 - `GET /astra04/readyxnet/source/pm/pm_repzw.php`: meter-reading page.
 - `GET /astra04/readyxnet/source/pm/pm_prbzgww.php`: warning/limit settings.
+- `GET /astra04/readyxnet/source/pm/pm_graph.php`: HTML graph/image-map page.
+  The physical meter graph exposes 15-minute cumulative and interval kWh points
+  in tooltip text. Direct T1/T2 graph IDs returned zero curves for the observed
+  2026-06-19 daily range.
 
 Widget RPC methods observed:
 
@@ -172,3 +197,16 @@ Widget RPC methods observed:
   solar/object channels as `total_increasing`.
 - Do not expose Android card values (`_vb_vll`, `_lvb_vll`, `_ez_vll`, etc.) as
   Energy Dashboard totals until live values prove they are cumulative.
+- Use the `recent_refresh_hours` option/service field to re-fetch a recent
+  overlap window, default 24 hours, when importing historical statistics.
+- Confirmed pricing data is currently limited to invoice totals from
+  `get_mtr_inv`. Per-kWh grid/PV tariffs should only become Home Assistant price
+  entities once an endpoint returns actual tariff values. When confirmed, expose
+  gross values as `net_price * 1.19` because the provider values are before tax.
+
+## Local Analysis Artifacts
+
+- `tools/astra_15min_export.py`: converts a raw daily `get_mtr_eb` capture into
+  a 96-row CSV and SVG graphs for interval kWh and average kW.
+- `tools/astra_web_probe.py`: fetches observed web graph/report endpoints with a
+  locally captured browser session and writes ignored CSV/SVG/report artifacts.

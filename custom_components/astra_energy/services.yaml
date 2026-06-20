@@ -7,6 +7,13 @@ backfill_history:
           min: 0
           max: 3650
           mode: box
+    recent_refresh_hours:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 168
+          mode: box
     import_statistics:
       required: false
       selector:

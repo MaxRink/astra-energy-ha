@@ -18,6 +18,7 @@
           "base_url": "Base URL",
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
+          "recent_refresh_hours": "Recent refresh hours",
           "import_statistics": "Import historical long-term statistics"
         },
         "data_description": {
@@ -26,6 +27,7 @@
           "base_url": "Android API endpoint. Keep the default unless Astra changes servers.",
           "poll_interval": "How often Home Assistant polls Astra for current meter readings.",
           "backfill_days": "How many days to fetch when running the backfill action.",
+          "recent_refresh_hours": "How many recent hours to re-fetch when running the backfill action.",
           "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics."
         }
       },
@@ -46,6 +48,7 @@
           "base_url": "Base URL",
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
+          "recent_refresh_hours": "Recent refresh hours",
           "import_statistics": "Import historical long-term statistics"
         }
       }
@@ -58,6 +61,7 @@
         "data": {
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
+          "recent_refresh_hours": "Recent refresh hours",
           "import_statistics": "Import historical long-term statistics"
         }
       }
@@ -71,6 +75,10 @@
         "backfill_days": {
           "name": "Backfill days",
           "description": "Number of days to fetch from Astra."
+        },
+        "recent_refresh_hours": {
+          "name": "Recent refresh hours",
+          "description": "Recent overlap to fetch again, useful when Astra adjusts late-arriving values."
         },
         "import_statistics": {
           "name": "Import statistics",

@@ -109,6 +109,7 @@ components:
             s_datum:
               type: string
               default: "-1"
+              description: Use YYYY-MM-DD for observed 15-minute daily fields.
     DataRequest:
       allOf:
         - $ref: "#/components/schemas/LoginRequest"
@@ -218,6 +219,30 @@ components:
         v05:
           type: string
           description: Reading date/time.
+    EnergyBalancePayload:
+      type: object
+      description: Observed `get_mtr_eb` payload.
+      properties:
+        auth:
+          type: string
+          enum: ["0", "1"]
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              _lvb_lbl_14h:
+                type: string
+                description: 96 comma-separated quarter-hour labels.
+              _lvb_ttl:
+                type: string
+                description: Series names, e.g. Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug.
+              _lvb_vll_14h:
+                type: string
+                description: Semicolon-separated quarter-hour interval-kWh series matching `_lvb_ttl`.
+              _lvb_eh:
+                type: string
+                example: kWh
         v06:
           type: string
           description: Medium.

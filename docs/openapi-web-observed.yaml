@@ -67,9 +67,50 @@ paths:
           name: s_rmnt
           schema:
             type: string
+        - in: query
+          name: s_eh
+          schema:
+            type: string
+            enum: ["0", "1", kWh, MWh]
+        - in: query
+          name: MWSTENB
+          schema:
+            type: string
+            description: Observed tax-related toggle; did not populate blank price cells.
       responses:
         "200":
           description: HTML report content.
+  /astra04/readyxnet/source/pm/pm_graph.php:
+    get:
+      summary: Meter graph image-map page
+      parameters:
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+        - in: query
+          name: id
+          schema:
+            type: string
+        - in: query
+          name: s_vom
+          schema:
+            type: string
+        - in: query
+          name: s_bis
+          schema:
+            type: string
+        - in: query
+          name: s_tvom
+          schema:
+            type: string
+        - in: query
+          name: s_tbis
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ISO-8859-1 HTML with graph tooltip values in image-map areas.
   /astra04/readyxnet/source/pm/pm_repzw.php:
     get:
       summary: Meter readings page

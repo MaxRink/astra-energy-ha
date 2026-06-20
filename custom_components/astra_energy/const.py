@@ -7,16 +7,19 @@ DOMAIN = "astra_energy"
 CONF_BASE_URL = "base_url"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_BACKFILL_DAYS = "backfill_days"
+CONF_RECENT_REFRESH_HOURS = "recent_refresh_hours"
 CONF_IMPORT_STATISTICS = "import_statistics"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
 
 DEFAULT_BASE_URL = "https://astra-cloud.com/readyxnet/source/login/csandroid.php"
 DEFAULT_POLL_INTERVAL = 300
 DEFAULT_BACKFILL_DAYS = 7
+DEFAULT_RECENT_REFRESH_HOURS = 24
 DEFAULT_IMPORT_STATISTICS = False
 
 MIN_POLL_INTERVAL = 60
 MAX_BACKFILL_DAYS = 3650
+MAX_RECENT_REFRESH_HOURS = 168
 
 ATTR_METER_ID = "meter_id"
 ATTR_RAW_METER_ID = "raw_meter_id"

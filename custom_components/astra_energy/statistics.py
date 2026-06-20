@@ -54,13 +54,19 @@ async def async_backfill_statistics(
     coordinator: AstraEnergyCoordinator,
     *,
     days: int,
+    recent_refresh_hours: int,
     import_statistics: bool,
 ) -> dict[str, int]:
     """Fetch historical readings and optionally import long-term statistics."""
-    if days <= 0:
+    if days <= 0 and recent_refresh_hours <= 0:
         return {}
     end = dt_util.utcnow()
-    start = end - timedelta(days=days)
+    start_candidates = []
+    if days > 0:
+        start_candidates.append(end - timedelta(days=days))
+    if recent_refresh_hours > 0:
+        start_candidates.append(end - timedelta(hours=recent_refresh_hours))
+    start = min(start_candidates)
     readings = await coordinator.client.async_get_historical_meter_stands(start, end)
     grouped: dict[str, list[AstraMeterReading]] = {}
     for reading in readings:

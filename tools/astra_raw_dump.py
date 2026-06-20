@@ -25,6 +25,7 @@ DEFAULT_ACTIONS = (
     "get_mtr_verbrauch",
     "get_mtr_vbmed",
     "get_mtr_hist",
+    "get_mtr_inv",
     "get_verbrauch",
     "get_wf",
     "lngchg_medium_list",

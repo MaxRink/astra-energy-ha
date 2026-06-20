@@ -16,10 +16,13 @@ from .const import (
     CONF_CONFIG_ENTRY_ID,
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
+    CONF_RECENT_REFRESH_HOURS,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_RECENT_REFRESH_HOURS,
     DOMAIN,
+    MAX_RECENT_REFRESH_HOURS,
     SERVICE_BACKFILL_HISTORY,
 )
 from .coordinator import AstraEnergyCoordinator
@@ -30,6 +33,9 @@ type AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
 _SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_BACKFILL_DAYS): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional(CONF_RECENT_REFRESH_HOURS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)
+        ),
         vol.Optional(CONF_IMPORT_STATISTICS): bool,
         vol.Optional(CONF_CONFIG_ENTRY_ID): str,
     }
@@ -66,10 +72,15 @@ async def _async_backfill_history(
             CONF_IMPORT_STATISTICS,
             entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
         )
+        recent_refresh_hours = call.data.get(
+            CONF_RECENT_REFRESH_HOURS,
+            entry.options.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
+        )
         response[entry_id] = await async_backfill_statistics(
             hass,
             coordinator,
             days=days,
+            recent_refresh_hours=recent_refresh_hours,
             import_statistics=import_statistics,
         )
     return response

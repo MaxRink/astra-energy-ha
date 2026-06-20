@@ -17,12 +17,15 @@ from .const import (
     CONF_BASE_URL,
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
+    CONF_RECENT_REFRESH_HOURS,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_RECENT_REFRESH_HOURS,
     DOMAIN,
     MAX_BACKFILL_DAYS,
+    MAX_RECENT_REFRESH_HOURS,
     MIN_POLL_INTERVAL,
 )
 
@@ -68,6 +71,10 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_BACKFILL_DAYS)),
             vol.Required(
+                CONF_RECENT_REFRESH_HOURS,
+                default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
+            vol.Required(
                 CONF_IMPORT_STATISTICS,
                 default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
             ): bool,
@@ -109,6 +116,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
                         CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
+                        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
                     },
                 )
@@ -184,6 +192,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
                         CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
+                        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
                     },
                 )
@@ -230,6 +239,14 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
                             CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_BACKFILL_DAYS)),
+                    vol.Required(
+                        CONF_RECENT_REFRESH_HOURS,
+                        default=self.config_entry.options.get(
+                            CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)
+                    ),
                     vol.Required(
                         CONF_IMPORT_STATISTICS,
                         default=self.config_entry.options.get(
