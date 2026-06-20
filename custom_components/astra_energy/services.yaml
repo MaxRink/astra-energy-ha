@@ -1,0 +1,17 @@
+backfill_history:
+  fields:
+    backfill_days:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 3650
+          mode: box
+    import_statistics:
+      required: false
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        text:

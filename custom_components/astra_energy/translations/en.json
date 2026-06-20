@@ -1,0 +1,119 @@
+{
+  "config": {
+    "abort": {
+      "reauth_successful": "Reauthentication successful"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "user": {
+        "title": "Astra Energy",
+        "description": "Connect an Astra energy account.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "base_url": "Base URL",
+          "poll_interval": "Polling interval in seconds",
+          "backfill_days": "Backfill days",
+          "import_statistics": "Import historical long-term statistics"
+        },
+        "data_description": {
+          "username": "Astra Cockpit username.",
+          "password": "Astra Cockpit password.",
+          "base_url": "Android API endpoint. Keep the default unless Astra changes servers.",
+          "poll_interval": "How often Home Assistant polls Astra for current meter readings.",
+          "backfill_days": "How many days to fetch when running the backfill action.",
+          "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Astra Energy",
+        "description": "Update Astra credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Astra Energy",
+        "description": "Update Astra connection settings.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "base_url": "Base URL",
+          "poll_interval": "Polling interval in seconds",
+          "backfill_days": "Backfill days",
+          "import_statistics": "Import historical long-term statistics"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Astra Energy options",
+        "data": {
+          "poll_interval": "Polling interval in seconds",
+          "backfill_days": "Backfill days",
+          "import_statistics": "Import historical long-term statistics"
+        }
+      }
+    }
+  },
+  "services": {
+    "backfill_history": {
+      "name": "Backfill history",
+      "description": "Fetch historical Astra meter readings and optionally import them into long-term statistics.",
+      "fields": {
+        "backfill_days": {
+          "name": "Backfill days",
+          "description": "Number of days to fetch from Astra."
+        },
+        "import_statistics": {
+          "name": "Import statistics",
+          "description": "Write fetched historical readings to recorder long-term statistics."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional loaded Astra Energy config entry ID. Leave empty to backfill all loaded Astra Energy entries."
+        }
+      }
+    }
+  },
+  "issues": {
+    "api_auth_failed": {
+      "title": "Astra Energy authentication failed",
+      "description": "Astra rejected the stored credentials. Reauthenticate the Astra Energy integration. Last error: {error}"
+    },
+    "api_unavailable": {
+      "title": "Astra Energy update failed",
+      "description": "Astra Energy could not fetch meter data. Home Assistant will retry automatically. Last error: {error}"
+    },
+    "backfill_failed": {
+      "title": "Astra Energy backfill failed",
+      "description": "Astra Energy could not import historical statistics. Last error: {error}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power": {
+        "name": "Power"
+      },
+      "imported_energy": {
+        "name": "Grid energy"
+      },
+      "solar_energy": {
+        "name": "Solar energy"
+      },
+      "total_energy": {
+        "name": "Total energy"
+      },
+      "exported_energy": {
+        "name": "Exported energy"
+      }
+    }
+  }
+}

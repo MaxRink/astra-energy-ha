@@ -1,0 +1,30 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local credentials. Keep `.env.example` tracked, but never commit filled files.
+.env
+.env.*
+.secrets.env
+.secrets.env.*
+!.env.example
+
+# Raw Astra captures may contain credentials, cookies, tokens, meter IDs, and
+# personal consumption data. Keep them local only.
+captures/
+*.har
+*.pcap
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Local Home Assistant/config-test scratch data.
+.storage/
+deps/
+home-assistant.log*

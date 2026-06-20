@@ -1,0 +1,12 @@
+{
+  "domain": "astra_energy",
+  "name": "Astra Energy",
+  "after_dependencies": ["recorder"],
+  "codeowners": ["@MaxRink"],
+  "config_flow": true,
+  "documentation": "https://github.com/MaxRink/astra-energy-ha",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

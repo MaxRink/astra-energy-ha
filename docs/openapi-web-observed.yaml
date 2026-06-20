@@ -1,0 +1,113 @@
+openapi: 3.1.0
+info:
+  title: Astra ReadyXNet Web Endpoints
+  version: 0.1.0-observed
+  description: |
+    Observed browser endpoints from CDP capture. This is not an official API;
+    the browser flow is frame-based and uses reCAPTCHA for login.
+servers:
+  - url: https://astra-cloud.com
+paths:
+  /readyxnet/source/login/csloginw.php:
+    get:
+      summary: Browser login page
+      responses:
+        "200":
+          description: HTML login form.
+    post:
+      summary: Browser login submit
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                UserName:
+                  type: string
+                Password:
+                  type: string
+                Email:
+                  type: string
+                strRequestType:
+                  const: Submit
+                g-recaptcha-response:
+                  type: string
+      responses:
+        "200":
+          description: Login response/frame bootstrap.
+  /astra04/readyxnet/source/pm/ajax.php:
+    post:
+      summary: Widget JSON-RPC endpoint
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              $ref: "#/components/schemas/WidgetRpcRequest"
+      responses:
+        "200":
+          description: JSON object with `result.content`.
+  /astra04/readyxnet/source/pm/pm_repeaverbr.php:
+    get:
+      summary: Consumption report page
+      parameters:
+        - in: query
+          name: Report
+          schema:
+            type: string
+            enum: ["2", "3", "4"]
+        - in: query
+          name: s_year
+          schema:
+            type: string
+        - in: query
+          name: s_fday
+          schema:
+            type: string
+        - in: query
+          name: s_rmnt
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML report content.
+  /astra04/readyxnet/source/pm/pm_repzw.php:
+    get:
+      summary: Meter readings page
+      responses:
+        "200":
+          description: HTML meter readings page.
+  /astra04/readyxnet/source/pm/pm_prbzgww.php:
+    get:
+      summary: Warning/limit settings page
+      responses:
+        "200":
+          description: HTML settings page.
+components:
+  schemas:
+    WidgetRpcRequest:
+      type: object
+      required: [id, method, params]
+      properties:
+        id:
+          type: integer
+        method:
+          type: string
+          enum:
+            - PMCustomContent::LoadWidgetContents
+            - PMCustomContent::RefreshWidgetContentsNew
+            - PMCustomContent::CheckMessages
+            - PMCustomContent::isSessionAlive
+            - PMCustomContent::WGAddContent
+        params:
+          type: array
+          items:
+            type: object
+            properties:
+              sessionId:
+                type: string
+              userId:
+                type: string
+              wgid:
+                type: string
+              url:
+                type: string

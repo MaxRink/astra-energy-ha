@@ -1,0 +1,14 @@
+[project]
+name = "astra-energy-ha"
+version = "0.1.0"
+description = "Home Assistant custom integration and API discovery tooling for Astra energy data"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

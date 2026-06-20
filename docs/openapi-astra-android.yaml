@@ -1,0 +1,295 @@
+openapi: 3.1.0
+info:
+  title: Astra Cockpit Android API
+  version: 0.1.0-observed
+  description: |
+    Reverse-engineered documentation for the Astra Cockpit Android API.
+    This is not an official Astra specification. Schemas are based on static
+    analysis of `de.astra_software.astracockpit` and observed web/API behavior.
+servers:
+  - url: https://astra-cloud.com
+paths:
+  /readyxnet/source/login/csandroid.php:
+    post:
+      summary: Signed Android API action endpoint
+      description: |
+        Single form-POST endpoint used for timestamp fetch, login, and data
+        actions. Every request includes `s_dv=1`. Every response appends
+        `md5(payload)` as the final 32 characters; clients must strip and verify
+        that suffix before parsing the payload.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/TimestampRequest"
+                - $ref: "#/components/schemas/LoginRequest"
+                - $ref: "#/components/schemas/DataRequest"
+                - $ref: "#/components/schemas/StreamRequest"
+      responses:
+        "200":
+          description: Checksum-suffixed payload text.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Response payload followed by 32 hex MD5 characters.
+components:
+  schemas:
+    TimestampRequest:
+      type: object
+      required: [s_action, s_ts, s_cs, s_dv]
+      properties:
+        s_action:
+          const: get_ts
+        s_ts:
+          const: ""
+        s_cs:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+        s_dv:
+          const: "1"
+    SignedRequestBase:
+      type: object
+      required: [s_action, s_ts, s_cs, s_dv]
+      properties:
+        s_action:
+          type: string
+          enum:
+            - auth_login
+            - get_verbrauch
+            - get_mtr_vb_overview
+            - get_mtr_verbrauch
+            - get_mtr_vbmed
+            - get_mtr_hist
+            - get_mtr_autarkie
+            - get_mtr_eb
+            - get_mtr_lzs
+            - get_mtr_inv
+            - get_mtr_inv_pdf
+            - get_immo_list
+            - get_wf
+            - lngchg_medium_list
+        s_ts:
+          type: string
+          description: Timestamp returned by `get_ts`.
+        s_cs:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+          description: md5("SNAFU" + s_action + s_ts).
+        s_dv:
+          const: "1"
+    LoginRequest:
+      allOf:
+        - $ref: "#/components/schemas/SignedRequestBase"
+        - type: object
+          required: [s_sid, s_immo, s_year, s_med, s_lang, s_mnt, s_datum]
+          properties:
+            s_action:
+              const: auth_login
+            s_sid:
+              type: string
+              pattern: "^[a-f0-9]{32}$"
+              description: md5(username + md5(password)).
+            s_immo:
+              type: string
+              default: "-1"
+            s_year:
+              type: string
+            s_med:
+              type: string
+              default: "1"
+            s_lang:
+              type: string
+              default: de
+            s_mnt:
+              type: string
+              default: "-1"
+            s_datum:
+              type: string
+              default: "-1"
+    DataRequest:
+      allOf:
+        - $ref: "#/components/schemas/LoginRequest"
+        - type: object
+          properties:
+            s_action:
+              enum:
+                - get_verbrauch
+                - get_mtr_vb_overview
+                - get_mtr_verbrauch
+                - get_mtr_vbmed
+                - get_mtr_hist
+                - get_mtr_autarkie
+                - get_mtr_eb
+                - get_mtr_lzs
+                - get_mtr_inv
+                - get_immo_list
+                - get_wf
+                - lngchg_medium_list
+    StreamRequest:
+      allOf:
+        - $ref: "#/components/schemas/SignedRequestBase"
+        - type: object
+          required: [s_sid, s_id]
+          properties:
+            s_action:
+              const: get_mtr_inv_pdf
+            s_sid:
+              type: string
+              pattern: "^[a-f0-9]{32}$"
+            s_id:
+              type: string
+    AuthLoginPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+          enum: ["0", "1"]
+        comp_id:
+          type: string
+        comp_name:
+          type: string
+        user:
+          type: string
+        auft:
+          type: string
+        immo_sel:
+          type: string
+        is_mieter:
+          type: string
+          enum: ["0", "1"]
+        is_t1t2:
+          type: string
+          enum: ["0", "1"]
+        med_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/Medium"
+        standort_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+    Medium:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        img:
+          type: string
+    Location:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        country:
+          type: string
+    LatestMeterReadingsPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+          enum: ["0", "1"]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LatestMeterReadingRow"
+    LatestMeterReadingRow:
+      type: object
+      description: Observed `get_mtr_lzs` row.
+      properties:
+        v01:
+          type: string
+          description: Meter label.
+        v02:
+          type: string
+          description: Current/cumulative meter value.
+        v03:
+          type: string
+          description: Unit, e.g. kWh.
+        v04:
+          type: string
+          description: Interval consumption.
+        v05:
+          type: string
+          description: Reading date/time.
+        v06:
+          type: string
+          description: Medium.
+        v07:
+          type: string
+          description: Account/order label.
+    OverviewPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              v01:
+                type: string
+              v02:
+                type: string
+              v03:
+                type: string
+    ConsumptionSeriesPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              _vb_vll_vy:
+                type: string
+              _vb_vll_ly:
+                type: string
+              _vb_x:
+                type: string
+              _vb_ttl:
+                type: string
+              _vb_eh:
+                type: string
+    InvoicePayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              DATUM:
+                type: string
+              SUM:
+                type: string
+              TITEL:
+                type: string
+              DOCS:
+                type: string
+                description: Colon-separated documents, semicolon fields.
+    InvoicePdfPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              pdfUri:
+                type: string
+              alias:
+                type: string
