@@ -112,10 +112,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     if not hass.services.has_service(DOMAIN, SERVICE_BACKFILL_HISTORY):
+
+        async def _async_handle_backfill(call: ServiceCall) -> dict[str, dict[str, int]]:
+            return await _async_backfill_history(hass, call)
+
         hass.services.async_register(
             DOMAIN,
             SERVICE_BACKFILL_HISTORY,
-            lambda call: _async_backfill_history(hass, call),
+            _async_handle_backfill,
             schema=_SERVICE_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
