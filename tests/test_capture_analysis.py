@@ -487,6 +487,50 @@ def test_daily_interval_catchup_requires_at_least_two_flat_buckets() -> None:
     assert [point["total_kwh"] for point in points] == [0.0, 8.0]
 
 
+def test_interval_catchup_can_redistribute_across_midnight() -> None:
+    previous_day = dt.date(2026, 6, 18)
+    current_day = dt.date(2026, 6, 19)
+    raw_points = [
+        {
+            "timestamp": dt.datetime.combine(previous_day, dt.time(23, 30), tzinfo=dt.UTC),
+            "total_kwh": 0.0,
+            "solar_kwh": 0.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 0.0,
+            "unsmoothed_solar_kwh": 0.0,
+            "unsmoothed_grid_kwh": 0.0,
+        },
+        {
+            "timestamp": dt.datetime.combine(previous_day, dt.time(23, 45), tzinfo=dt.UTC),
+            "total_kwh": 0.0,
+            "solar_kwh": 0.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 0.0,
+            "unsmoothed_solar_kwh": 0.0,
+            "unsmoothed_grid_kwh": 0.0,
+        },
+        {
+            "timestamp": dt.datetime.combine(current_day, dt.time(0, 15), tzinfo=dt.UTC),
+            "total_kwh": 9.0,
+            "solar_kwh": 0.0,
+            "grid_kwh": 9.0,
+            "unsmoothed_total_kwh": 9.0,
+            "unsmoothed_solar_kwh": 0.0,
+            "unsmoothed_grid_kwh": 9.0,
+        },
+    ]
+
+    sanitized, report = astra_api._sanitize_interval_points(raw_points, max_average_kw=50.0)
+
+    assert report["total_kwh_catchup_redistributed"] == 1
+    assert [point["timestamp"].date() for point in sanitized] == [
+        previous_day,
+        previous_day,
+        current_day,
+    ]
+    assert [point["total_kwh"] for point in sanitized] == [3.0, 3.0, 3.0]
+
+
 def test_profiled_smoothing_ignores_out_of_window_days() -> None:
     timestamp = dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC)
     weights = astra_api._redistribution_weights(

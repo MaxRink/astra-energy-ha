@@ -576,6 +576,24 @@ def _daily_interval_values_and_report_from_payload(
     smoothing_lookaround_days: int = DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Parse one `get_mtr_eb` daily payload into sanitized 15-minute values."""
+    points, report = _daily_interval_raw_values_from_payload(data, day)
+    if report:
+        return points, report
+    sanitized, sanitize_report = _sanitize_interval_points(
+        points,
+        max_average_kw=max_average_kw,
+        smooth_anomalies=smooth_anomalies,
+        redistribution_window=redistribution_window,
+        smoothing_lookaround_days=smoothing_lookaround_days,
+    )
+    return sanitized, sanitize_report
+
+
+def _daily_interval_raw_values_from_payload(
+    data: dict[str, Any],
+    day: date,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Parse one `get_mtr_eb` daily payload into unsanitized 15-minute values."""
     rows = data.get("data") or []
     if not rows or not isinstance(rows[0], dict):
         return [], {"empty_payload": 1}
@@ -611,14 +629,7 @@ def _daily_interval_values_and_report_from_payload(
                 "battery_kwh": battery,
             }
         )
-    sanitized, _report = _sanitize_interval_points(
-        points,
-        max_average_kw=max_average_kw,
-        smooth_anomalies=smooth_anomalies,
-        redistribution_window=redistribution_window,
-        smoothing_lookaround_days=smoothing_lookaround_days,
-    )
-    return sanitized, _report
+    return points, {}
 
 
 def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list[dict[str, Any]]:
@@ -1077,27 +1088,34 @@ class AstraClient:
                 return day, data
 
         payloads = await asyncio.gather(*(fetch_day(day) for day in days))
-        points = []
+        raw_points = []
         invalid_hours: set[datetime] = set()
         anomaly_report: dict[str, int] = {}
         for day, data in sorted(payloads, key=lambda item: item[0]):
-            day_points, day_report = _daily_interval_values_and_report_from_payload(
+            day_points, day_report = _daily_interval_raw_values_from_payload(
                 data,
                 day,
-                max_average_kw=max_average_kw,
-                smooth_anomalies=smooth_anomalies,
-                redistribution_window=redistribution_window,
-                smoothing_lookaround_days=smoothing_lookaround_days,
             )
             for key, value in day_report.items():
                 anomaly_report[key] = anomaly_report.get(key, 0) + value
-            for point in day_points:
-                if not (start <= point["timestamp"] <= end):
-                    continue
-                if not point.get("valid", True):
-                    invalid_hours.add(_interval_hour_start(point["timestamp"]))
-                    continue
-                points.append(point)
+            raw_points.extend(day_points)
+        sanitized_points, sanitize_report = _sanitize_interval_points(
+            raw_points,
+            max_average_kw=max_average_kw,
+            smooth_anomalies=smooth_anomalies,
+            redistribution_window=redistribution_window,
+            smoothing_lookaround_days=smoothing_lookaround_days,
+        )
+        for key, value in sanitize_report.items():
+            anomaly_report[key] = anomaly_report.get(key, 0) + value
+        points = []
+        for point in sanitized_points:
+            if not (start <= point["timestamp"] <= end):
+                continue
+            if not point.get("valid", True):
+                invalid_hours.add(_interval_hour_start(point["timestamp"]))
+                continue
+            points.append(point)
         if invalid_hours:
             points = [
                 point
