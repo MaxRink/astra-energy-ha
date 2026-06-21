@@ -40,7 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 RECORDER_SOURCE = "recorder"
 INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
 INTERVAL_CACHE_STORAGE_VERSION = 1
-STATISTIC_IMPORT_BATCH_SIZE = 250
+STATISTIC_IMPORT_BATCH_SIZE = 50
 
 @dataclass(frozen=True)
 class StatisticChannel:
