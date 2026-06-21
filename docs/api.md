@@ -186,7 +186,7 @@ python3 tools/astra_endpoint_discovery.py \
   --out captures/astra-endpoint-discovery-latest.json
 ```
 
-## Confirmed iOS App Metadata
+## Confirmed Installed iOS App Analysis
 
 Public App Store metadata identifies an iOS app:
 
@@ -199,17 +199,161 @@ Public App Store metadata identifies an iOS app:
 - Minimum OS: iOS 13.0
 - App Store URL: `https://apps.apple.com/de/app/astra-cockpit/id1516855287`
 
-The iOS app is newer than the locally analyzed Android APK. If the Android
-`csandroid.php` endpoint keeps returning empty `get_ts`, the next best source of
-truth is static and/or dynamic iOS app analysis:
+The app is also installed locally as a macOS wrapper app:
 
-1. Obtain the IPA through Apple-authenticated tooling such as `ipatool`, Apple
-   Configurator, or a paired-device export.
-2. Extract the IPA and run `strings` on the app binary for `astra-cloud.com`,
-   `readyxnet`, `s_action`, `get_ts`, and endpoint/action names.
-3. If static strings are insufficient, run the iOS app through an HTTPS proxy on
-   a test device and capture only request URLs, form keys, and response schemas.
-4. Keep IPA files and raw captures out of git.
+- Wrapper path: `/Applications/astracockpit.app`
+- iOS bundle path:
+  `/Applications/astracockpit.app/Wrapper/astracockpit.app`
+- Executable:
+  `/Applications/astracockpit.app/Wrapper/astracockpit.app/astracockpit`
+- Mach-O: 64-bit arm64 executable.
+- Code signing identifier: `de.astra-software.astracockpit`
+- Signing team: `NX5RVVWY6R`
+- Local bundle version: `CFBundleShortVersionString=1.3`,
+  `CFBundleVersion=1`
+- Built as `iPhoneOS`, minimum OS `13.0`, with `DTSDKName=iphoneos26.2`.
+- `ITSAppUsesNonExemptEncryption=false`.
+- Bundled frameworks: Apple system frameworks plus `Charts.framework`; no
+  separate HTTP, analytics, or web-wrapper framework was found.
+- Localized resources: German and English `Localizable.strings` and
+  `Main.strings`.
+- DRM metadata: `SC_Info/*` and `ITSDRMScheme=v2` are present, but static
+  strings and Swift reflection metadata remain readable.
+
+Static strings and disassembly of the installed app found the iOS mobile
+endpoint:
+
+- `POST https://astra-cloud.com/readyxnet/source/login/csios.php`
+- Content type: `application/x-www-form-urlencoded`
+- Transport code uses native `URLRequest`, `NSURLSession.sharedSession`,
+  `dataTaskWithRequest:completionHandler:`, and `NSJSONSerialization`.
+- The app imports and calls `CC_MD5`.
+
+### iOS Request Signing
+
+The installed iOS binary uses the same signed mobile form protocol as the
+Android APK. Disassembly of the body builder shows:
+
+1. Initial timestamp request:
+   - `s_action=get_ts`
+   - `s_ts=`
+   - `s_cs=md5("SNAFU" + "get_ts" + "")`
+2. Data request:
+   - `s_action=<action>`
+   - `s_ts=<timestamp returned by get_ts>`
+   - `s_cs=md5("SNAFU" + action + timestamp)`
+3. Form body then appends request parameters and `s_dv=1`.
+
+The data request parameter set is also the same as Android:
+
+- `s_sid`
+- `s_immo`
+- `s_year`
+- `s_mnt`
+- `s_datum`
+- `s_med`
+- `s_lang`
+
+The app does not reveal a separate username/password login endpoint. It uses
+the locally derived session id (`s_sid`) and stores local values through a
+Swift `Keychain` wrapper.
+
+### iOS Action and View Map
+
+The storyboard and string tables expose these view controllers:
+
+- `LoginViewController`
+- `NavPanelViewController`
+- `VboViewController`: consumption overview.
+- `VbmViewController`: consumption by medium.
+- `EbViewController`: energy balance.
+- `AutViewController`: autarky degree.
+- `VbbViewController`: consumption.
+- `VbHistViewController`: historical trends.
+- `ZsViewController`: meter status.
+- `WfViewController`: weather forecast.
+- `ImmoViewController` and `ObjektViewController`: location/object views.
+
+Action strings present in the installed iOS binary:
+
+- `get_mtr_vb_overview`
+- `get_mtr_autarkie`
+- `get_mtr_verbrauch`
+
+Other action names are likely constructed or inherited through shared code paths
+without appearing as plain strings. The request helper accepts the same generic
+request object used by the Android endpoints.
+
+### iOS Response Model Fields
+
+Swift reflection and C strings expose the same account fields as Android:
+
+- `auth`
+- `med_list`
+- `standort_list`
+- `user`
+- `comp_id`
+- `comp_name`
+- `immo_sel`
+- `is_mieter`
+- `is_t1t2`
+
+The installed app also contains response model names that confirm richer chart
+channels and quarter-hour variants:
+
+- Generic table rows: `v01` through `v12`, `VJ`, `LJ`.
+- Total consumption family: `vb_*`, including `vb_vll`, `vb_lbl`,
+  `vb_ttl`, `vb_eh`, `vb_clr`, `vb_vll_14h`, `vb_lbl_14h`.
+- Historical/overview family: `hvb_*`, including `hvb_vll_14h`.
+- Tariff/object split families: `vbt2r_*`, `hvbt2r_*`, `hvbct2r_*`,
+  `lt2rvb_*`, including `_14h` variants.
+- Production/PV-like families: `ez_*` and `lez_*`, including `_14h`
+  variants.
+- Location and medium data classes: `mtrStandortData`, `mtrMedData`.
+- Meter/status data classes: `mtrVboData`, `mtrZsData`.
+
+These names line up with observed Android payloads where `get_mtr_eb` exposes
+15-minute `_lvb_*`, `_ez_*`, `_lez_*`, and tariff split values. They also
+confirm that quarter-hour data is an app feature, not just a web-only chart.
+
+### iOS Localized Feature Labels
+
+Useful labels found in German and English localizations:
+
+- `str_params_dlg_quaterval`: `1/4 h Werte` / `1/4 h values`.
+- `str_params_dlg_t2split`: `Objektbezug Unterteilung` /
+  `Split electricity from building`.
+- `rbMtrEb_Erzeugung`: `Erzeugung` / `Production`.
+- `rbMtrEb_Kombiniert`: `Kombiniert` / `Combined`.
+- `rbMtrEb_Verbrauch`: `Verbrauch` / `Consumption`.
+- `str_mtr_vbo_vb_strom_gesbez`: total electricity consumption.
+- `str_mtr_vbo_vb_strom_t1`: tariff 1 / network consumption.
+- `str_mtr_vbo_strom_t2`: tariff 2 / building-object consumption.
+- `str_mtr_vbo_vb_strom_pv`: PV consumption.
+- `str_mtr_vbo_vmco_strom_pv`: avoided CO2 through PV electricity.
+- `tbTtlMtrLzs`: meter status.
+
+### iOS Backend Recheck, 2026-06-21
+
+`csios.php` was probed with the recovered iOS signing protocol and the existing
+local credentials. The endpoint returned HTTP 200 with an empty body for
+unauthenticated `get_ts`, before any credential-derived data was sent.
+
+This was reproduced against both:
+
+- `https://astra-cloud.com/readyxnet/source/login/csios.php`
+- `https://astra-cloud.com/astra04/readyxnet/source/login/csios.php`
+
+Header variations including app-like user agents and
+`application/x-www-form-urlencoded` did not change the response. Since the
+binary confirms the same `get_ts` request shape, this currently looks like
+backend behavior, backend filtering, or endpoint state rather than a missing
+client-side parameter.
+
+If the installed app itself still loads data interactively while the direct
+probe receives empty responses, capture the app traffic through a local HTTPS
+proxy and compare only the request URL, form keys, and schema-level response
+shape. Keep raw captures out of git.
 
 ## Local Testing
 

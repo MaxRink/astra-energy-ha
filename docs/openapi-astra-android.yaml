@@ -1,19 +1,22 @@
 openapi: 3.1.0
 info:
-  title: Astra Cockpit Android API
+  title: Astra Cockpit Mobile API
   version: 0.1.0-observed
   description: |
-    Reverse-engineered documentation for the Astra Cockpit Android API.
+    Reverse-engineered documentation for the Astra Cockpit mobile API.
     This is not an official Astra specification. Schemas are based on static
-    analysis of `de.astra_software.astracockpit` and observed web/API behavior.
+    analysis of `de.astra_software.astracockpit`, the installed iOS app
+    `de.astra-software.astracockpit`, and observed web/API behavior.
     Local Android APK analyzed: versionName 1.0.14, versionCode 16.
+    Local iOS/macOS wrapper app analyzed:
+    `/Applications/astracockpit.app`, bundle version 1.3.
 
     Recheck on 2026-06-21: the endpoint returned HTTP 200 with an empty body for
     unauthenticated `get_ts`, before credentials were used. This may indicate
     temporary backend behavior, backend filtering, or a mobile protocol change.
-    Public App Store metadata shows a newer iOS app
-    `de.astra-software.astracockpit` version 1.3 released 2026-03-26; that app
-    should be analyzed if the Android endpoint remains empty.
+    The installed iOS app uses the same signed form protocol but points at
+    `/readyxnet/source/login/csios.php`, which also returned an empty body for
+    `get_ts` in the same recheck.
 servers:
   - url: https://astra-cloud.com
 paths:
@@ -43,6 +46,36 @@ paths:
               schema:
                 type: string
                 description: Response payload followed by 32 hex MD5 characters.
+  /readyxnet/source/login/csios.php:
+    post:
+      summary: Signed iOS API action endpoint
+      description: |
+        Single form-POST endpoint found in the installed iOS/macOS wrapper app
+        `de.astra-software.astracockpit` version 1.3. Static disassembly shows
+        the same body shape and MD5 signing algorithm as the Android endpoint:
+        `s_action`, `s_ts`, `s_cs`, request parameters, and `s_dv=1`.
+
+        Live recheck on 2026-06-21 returned HTTP 200 with an empty body for
+        `get_ts`, so this endpoint is documented as app-confirmed but not
+        currently usable from the direct local probe.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/TimestampRequest"
+                - $ref: "#/components/schemas/LoginRequest"
+                - $ref: "#/components/schemas/DataRequest"
+                - $ref: "#/components/schemas/StreamRequest"
+      responses:
+        "200":
+          description: Checksum-suffixed payload text or, in the current observed backend state, an empty body.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Response payload followed by 32 hex MD5 characters when the backend returns data.
 components:
   schemas:
     TimestampRequest:

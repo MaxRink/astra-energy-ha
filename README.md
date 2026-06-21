@@ -106,10 +106,15 @@ jadx -d captures/android/jadx/base captures/android/apks/base.apk
 apktool d -f -o captures/android/apktool/base captures/android/apks/base.apk
 ```
 
-Public App Store metadata also shows an iOS app, bundle
-`de.astra-software.astracockpit`, version `1.3`. If the Android endpoint stops
-returning data, obtain the IPA with Apple-authenticated tooling and repeat the
-static string/API analysis against the iOS binary.
+The iOS app is installed locally as `/Applications/astracockpit.app`. Static
+analysis of its wrapped binary confirms a native Swift app, not a WebView, and
+finds the mobile endpoint
+`https://astra-cloud.com/readyxnet/source/login/csios.php`. The iOS binary uses
+the same `SNAFU` + MD5 signed form protocol as Android and exposes the same core
+energy feature set: consumption overview, consumption by medium, energy
+balance, autarky, historical trends, meter status, object/location, weather,
+quarter-hour values, and object/grid split controls. Details are documented in
+`docs/api.md`.
 
 ## Home Assistant Development
 
