@@ -478,9 +478,13 @@ def _redistribute_interval_spikes(
 ) -> None:
     """Redistribute implausible delayed values over preceding flat buckets."""
     weight_keys = ("solar_kwh",) if key == "total_kwh" else ("total_kwh",)
+    delayed_catchup_min_kwh = max(1.0, max_interval_kwh / 4.0)
     for index, point in enumerate(points):
         value = float(point.get(key) or 0.0)
-        if value <= max_interval_kwh:
+        hard_spike = value > max_interval_kwh
+        if not hard_spike and (
+            not smooth_anomalies or value <= delayed_catchup_min_kwh
+        ):
             continue
         start = index
         while start > 0 and index - start < redistribution_window:
@@ -489,6 +493,8 @@ def _redistribute_interval_spikes(
                 break
             start -= 1
         indexes = list(range(start, index + 1))
+        if not hard_spike and len(indexes) < 3:
+            continue
         if not smooth_anomalies or len(indexes) <= 1:
             point["valid"] = False
             point.setdefault("anomalies", []).append(f"{key}_spike")
@@ -503,7 +509,8 @@ def _redistribute_interval_spikes(
         )
         for target_index, weight in zip(indexes, weights, strict=False):
             points[target_index][key] = value * weight
-        report[f"{key}_redistributed"] = report.get(f"{key}_redistributed", 0) + 1
+        reason = "redistributed" if hard_spike else "catchup_redistributed"
+        report[f"{key}_{reason}"] = report.get(f"{key}_{reason}", 0) + 1
         report[f"{key}_redistributed_buckets"] = (
             report.get(f"{key}_redistributed_buckets", 0) + len(indexes)
         )

@@ -442,6 +442,51 @@ def test_daily_interval_profiled_smoothing_uses_nearby_days() -> None:
     assert [point["unsmoothed_total_kwh"] for point in spike_day] == [0.0, 0.0, 20.0]
 
 
+def test_daily_interval_catchup_after_flat_gap_is_redistributed() -> None:
+    points, report = astra_api._daily_interval_values_and_report_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "_lvb_lbl_14h": "00:15,00:30,00:45",
+                    "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                    "_lvb_vll_14h": "0.0,0.0,8.0;0.0,0.0,8.0;0.0,0.0,0.0;0.0,0.0,0.0;0.0,0.0,0.0",
+                }
+            ],
+        },
+        dt.date(2026, 6, 15),
+        max_average_kw=50.0,
+    )
+
+    assert report["total_kwh_catchup_redistributed"] == 1
+    assert [round(point["total_kwh"], 6) for point in points] == [
+        round(8.0 / 3.0, 6),
+        round(8.0 / 3.0, 6),
+        round(8.0 / 3.0, 6),
+    ]
+    assert [point["unsmoothed_total_kwh"] for point in points] == [0.0, 0.0, 8.0]
+
+
+def test_daily_interval_catchup_requires_at_least_two_flat_buckets() -> None:
+    points, report = astra_api._daily_interval_values_and_report_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "_lvb_lbl_14h": "00:15,00:30",
+                    "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                    "_lvb_vll_14h": "0.0,8.0;0.0,8.0;0.0,0.0;0.0,0.0;0.0,0.0",
+                }
+            ],
+        },
+        dt.date(2026, 6, 15),
+        max_average_kw=50.0,
+    )
+
+    assert "total_kwh_catchup_redistributed" not in report
+    assert [point["total_kwh"] for point in points] == [0.0, 8.0]
+
+
 def test_profiled_smoothing_ignores_out_of_window_days() -> None:
     timestamp = dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC)
     weights = astra_api._redistribution_weights(
