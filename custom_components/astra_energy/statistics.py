@@ -57,9 +57,6 @@ class StatisticChannel:
 
 
 STATISTIC_CHANNELS = {
-    "grid_energy_cost_total": StatisticChannel("grid_cost_total_gross_eur", None, "EUR"),
-    "solar_energy_cost_total": StatisticChannel("solar_cost_total_gross_eur", None, "EUR"),
-    "total_energy_cost_total": StatisticChannel("total_cost_total_gross_eur", None, "EUR"),
     "current_month_grid_cost": StatisticChannel(
         "current_month_grid_cost_gross_eur",
         None,

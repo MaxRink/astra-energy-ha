@@ -5,6 +5,7 @@ import importlib.util
 import sys
 import types
 import asyncio
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -30,11 +31,13 @@ spec.loader.exec_module(astra_api)
 
 homeassistant_mod = types.ModuleType("homeassistant")
 homeassistant_components_mod = types.ModuleType("homeassistant.components")
+homeassistant_sensor_mod = types.ModuleType("homeassistant.components.sensor")
 homeassistant_config_entries_mod = types.ModuleType("homeassistant.config_entries")
 homeassistant_const_mod = types.ModuleType("homeassistant.const")
 homeassistant_core_mod = types.ModuleType("homeassistant.core")
 homeassistant_exceptions_mod = types.ModuleType("homeassistant.exceptions")
 homeassistant_helpers_mod = types.ModuleType("homeassistant.helpers")
+homeassistant_entity_mod = types.ModuleType("homeassistant.helpers.entity")
 homeassistant_aiohttp_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 homeassistant_update_coordinator_mod = types.ModuleType("homeassistant.helpers.update_coordinator")
 homeassistant_util_mod = types.ModuleType("homeassistant.util")
@@ -48,12 +51,52 @@ class StubDataUpdateCoordinator:
         return cls
 
 
+class StubCoordinatorEntity:
+    @classmethod
+    def __class_getitem__(cls, _item):
+        return cls
+
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+
+
+@dataclass(frozen=True, kw_only=True)
+class StubSensorEntityDescription:
+    key: str
+    translation_key: str | None = None
+    native_unit_of_measurement: str | None = None
+    device_class: str | None = None
+    state_class: str | None = None
+    entity_category: str | None = None
+    entity_registry_enabled_default: bool = True
+    suggested_display_precision: int | None = None
+
+
+class StubSensorEntity:
+    pass
+
+
 homeassistant_core_mod.HomeAssistant = object
 homeassistant_config_entries_mod.ConfigEntryAuthFailed = RuntimeError
 homeassistant_const_mod.UnitOfEnergy = types.SimpleNamespace(KILO_WATT_HOUR="kWh")
+homeassistant_const_mod.UnitOfPower = types.SimpleNamespace(WATT="W")
+homeassistant_sensor_mod.SensorDeviceClass = types.SimpleNamespace(
+    ENERGY="energy",
+    MONETARY="monetary",
+    POWER="power",
+)
+homeassistant_sensor_mod.SensorEntity = StubSensorEntity
+homeassistant_sensor_mod.SensorEntityDescription = StubSensorEntityDescription
+homeassistant_sensor_mod.SensorStateClass = types.SimpleNamespace(
+    MEASUREMENT="measurement",
+    TOTAL="total",
+    TOTAL_INCREASING="total_increasing",
+)
 homeassistant_exceptions_mod.HomeAssistantError = RuntimeError
+homeassistant_entity_mod.EntityCategory = types.SimpleNamespace(DIAGNOSTIC="diagnostic")
 homeassistant_aiohttp_mod.async_get_clientsession = lambda _hass: None
 homeassistant_update_coordinator_mod.DataUpdateCoordinator = StubDataUpdateCoordinator
+homeassistant_update_coordinator_mod.CoordinatorEntity = StubCoordinatorEntity
 homeassistant_update_coordinator_mod.UpdateFailed = RuntimeError
 homeassistant_dt_mod.utcnow = lambda: dt.datetime(2026, 6, 20, 12, 0, 0)
 homeassistant_dt_mod.as_utc = lambda value: value.astimezone(dt.UTC)
@@ -61,11 +104,13 @@ homeassistant_util_mod.dt = homeassistant_dt_mod
 homeassistant_unit_conversion_mod.EnergyConverter = types.SimpleNamespace(UNIT_CLASS="energy")
 sys.modules.setdefault("homeassistant", homeassistant_mod)
 sys.modules.setdefault("homeassistant.components", homeassistant_components_mod)
+sys.modules.setdefault("homeassistant.components.sensor", homeassistant_sensor_mod)
 sys.modules.setdefault("homeassistant.config_entries", homeassistant_config_entries_mod)
 sys.modules.setdefault("homeassistant.const", homeassistant_const_mod)
 sys.modules.setdefault("homeassistant.core", homeassistant_core_mod)
 sys.modules.setdefault("homeassistant.exceptions", homeassistant_exceptions_mod)
 sys.modules.setdefault("homeassistant.helpers", homeassistant_helpers_mod)
+sys.modules.setdefault("homeassistant.helpers.entity", homeassistant_entity_mod)
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", homeassistant_aiohttp_mod)
 sys.modules.setdefault(
     "homeassistant.helpers.update_coordinator", homeassistant_update_coordinator_mod
@@ -100,6 +145,15 @@ assert web_session_spec and web_session_spec.loader
 web_session = importlib.util.module_from_spec(web_session_spec)
 sys.modules[web_session_spec.name] = web_session
 web_session_spec.loader.exec_module(web_session)
+
+sensor_path = component_dir / "sensor.py"
+sensor_spec = importlib.util.spec_from_file_location(
+    "custom_components.astra_energy.sensor", sensor_path
+)
+assert sensor_spec and sensor_spec.loader
+astra_sensor = importlib.util.module_from_spec(sensor_spec)
+sys.modules[sensor_spec.name] = astra_sensor
+sensor_spec.loader.exec_module(astra_sensor)
 
 
 def test_endpoint_key_strips_query() -> None:
@@ -1222,15 +1276,6 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
     assert statistics._sensor_statistic_id(reading, "solar_energy") == ("sensor.astra_solar_energy")
     assert statistics._sensor_statistic_id(reading, "total_energy") == ("sensor.astra_total_energy")
-    assert statistics._sensor_statistic_id(reading, "grid_energy_cost_total") == (
-        "sensor.astra_grid_energy_cost_total"
-    )
-    assert statistics._sensor_statistic_id(reading, "solar_energy_cost_total") == (
-        "sensor.astra_solar_energy_cost_total"
-    )
-    assert statistics._sensor_statistic_id(reading, "total_energy_cost_total") == (
-        "sensor.astra_total_energy_cost_total"
-    )
     assert statistics._sensor_statistic_id(reading, "current_month_total_cost") == (
         "sensor.astra_current_month_total_cost"
     )
@@ -1242,10 +1287,29 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
 
 
-def test_unsmoothed_diagnostic_sensors_are_not_imported_to_recorder_statistics() -> None:
+def test_diagnostic_and_live_cost_total_sensors_are_not_imported_to_recorder_statistics() -> None:
     assert "unsmoothed_imported_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_solar_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_total_energy" not in statistics.STATISTIC_CHANNELS
+    assert "grid_energy_cost_total" not in statistics.STATISTIC_CHANNELS
+    assert "solar_energy_cost_total" not in statistics.STATISTIC_CHANNELS
+    assert "total_energy_cost_total" not in statistics.STATISTIC_CHANNELS
+
+
+def test_lifetime_cost_total_sensors_do_not_generate_recorder_statistics() -> None:
+    cost_descriptions = {
+        description.key: description
+        for description in astra_sensor.SENSOR_DESCRIPTIONS
+        if description.key
+        in {"grid_energy_cost_total", "solar_energy_cost_total", "total_energy_cost_total"}
+    }
+
+    assert set(cost_descriptions) == {
+        "grid_energy_cost_total",
+        "solar_energy_cost_total",
+        "total_energy_cost_total",
+    }
+    assert all(description.state_class is None for description in cost_descriptions.values())
 
 
 def test_statistics_channels_include_historical_derived_metrics() -> None:
@@ -1279,7 +1343,6 @@ def test_period_and_measurement_statistics_are_state_only() -> None:
     assert not statistics.STATISTIC_CHANNELS["current_year_total_cost"].has_sum
     assert not statistics.STATISTIC_CHANNELS["grid_price"].has_sum
     assert statistics.STATISTIC_CHANNELS["grid_price"].has_mean
-    assert statistics.STATISTIC_CHANNELS["grid_energy_cost_total"].has_sum
 
 
 def test_sum_statistics_rows_allow_period_resets() -> None:
