@@ -28,7 +28,12 @@
           "smooth_interval_anomalies": "Smooth delayed interval anomalies",
           "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
           "smoothing_lookaround_days": "Smoothing lookaround days",
-          "cache_interval_payloads": "Cache old interval API payloads"
+          "cache_interval_payloads": "Cache old interval API payloads",
+          "web_fallback_enabled": "Enable manual web-session fallback",
+          "web_base_url": "Web graph base URL",
+          "web_session_id": "Web sessionId",
+          "web_cookie": "Web Cookie header",
+          "web_graph_total_id": "Total energy web graph ID"
         },
         "data_description": {
           "username": "Astra Cockpit username.",
@@ -46,7 +51,12 @@
           "smooth_interval_anomalies": "Redistribute delayed provider spikes across preceding missing buckets instead of leaving them out as missing data.",
           "anomaly_redistribution_window": "Maximum number of preceding 15-minute buckets that one delayed spike may be spread over.",
           "smoothing_lookaround_days": "Use matching time-of-day values from nearby days to shape smoothing. Set to 0 to only use same-day channel shape.",
-          "cache_interval_payloads": "Do not re-download older daily interval payloads after they were fetched once. Recent hours are still refreshed."
+          "cache_interval_payloads": "Do not re-download older daily interval payloads after they were fetched once. Recent hours are still refreshed.",
+          "web_fallback_enabled": "Check an already logged-in Astra browser session as a fallback/diagnostic channel.",
+          "web_base_url": "Astra web portal graph directory. Keep the default unless Astra changes the portal path.",
+          "web_session_id": "sessionId from a logged-in Astra web URL. Stored in the config entry and redacted from diagnostics.",
+          "web_cookie": "Full Cookie header from the logged-in browser session. Stored in the config entry and redacted from diagnostics.",
+          "web_graph_total_id": "Astra pm_graph.php ID used to validate total-energy graph access."
         }
       },
       "reauth_confirm": {
@@ -76,7 +86,12 @@
           "smooth_interval_anomalies": "Smooth delayed interval anomalies",
           "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
           "smoothing_lookaround_days": "Smoothing lookaround days",
-          "cache_interval_payloads": "Cache old interval API payloads"
+          "cache_interval_payloads": "Cache old interval API payloads",
+          "web_fallback_enabled": "Enable manual web-session fallback",
+          "web_base_url": "Web graph base URL",
+          "web_session_id": "Web sessionId",
+          "web_cookie": "Web Cookie header",
+          "web_graph_total_id": "Total energy web graph ID"
         }
       }
     }
@@ -98,7 +113,12 @@
           "smooth_interval_anomalies": "Smooth delayed interval anomalies",
           "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
           "smoothing_lookaround_days": "Smoothing lookaround days",
-          "cache_interval_payloads": "Cache old interval API payloads"
+          "cache_interval_payloads": "Cache old interval API payloads",
+          "web_fallback_enabled": "Enable manual web-session fallback",
+          "web_base_url": "Web graph base URL",
+          "web_session_id": "Web sessionId",
+          "web_cookie": "Web Cookie header",
+          "web_graph_total_id": "Total energy web graph ID"
         }
       }
     }
@@ -167,6 +187,10 @@
     "backfill_failed": {
       "title": "Astra Energy backfill failed",
       "description": "Astra Energy could not import historical statistics. Last error: {error}"
+    },
+    "web_session_failed": {
+      "title": "Astra Energy web session failed",
+      "description": "The optional browser-session fallback is configured but not usable. Update the web sessionId/Cookie in the integration options or disable the fallback. Last error: {error}"
     }
   },
   "entity": {
@@ -260,6 +284,15 @@
       },
       "tax_rate": {
         "name": "Energy tax rate"
+      },
+      "api_status": {
+        "name": "API status"
+      },
+      "last_successful_source": {
+        "name": "Last successful source"
+      },
+      "web_session_status": {
+        "name": "Web session status"
       }
     }
   }

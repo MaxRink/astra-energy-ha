@@ -28,6 +28,11 @@ from .const import (
     CONF_SMOOTHING_LOOKAROUND_DAYS,
     CONF_SOLAR_PRICE_NET,
     CONF_TAX_RATE,
+    CONF_WEB_BASE_URL,
+    CONF_WEB_COOKIE,
+    CONF_WEB_FALLBACK_ENABLED,
+    CONF_WEB_GRAPH_TOTAL_ID,
+    CONF_WEB_SESSION_ID,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
@@ -42,6 +47,9 @@ from .const import (
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
+    DEFAULT_WEB_BASE_URL,
+    DEFAULT_WEB_FALLBACK_ENABLED,
+    DEFAULT_WEB_GRAPH_TOTAL_ID,
     DOMAIN,
     HISTORY_GRANULARITIES,
     MAX_BACKFILL_DAYS,
@@ -199,6 +207,26 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_CACHE_INTERVAL_PAYLOADS,
                 default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
             ): bool,
+            vol.Required(
+                CONF_WEB_FALLBACK_ENABLED,
+                default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
+            ): bool,
+            vol.Optional(
+                CONF_WEB_BASE_URL,
+                default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
+            ): str,
+            vol.Optional(
+                CONF_WEB_SESSION_ID,
+                default=defaults.get(CONF_WEB_SESSION_ID, ""),
+            ): str,
+            vol.Optional(
+                CONF_WEB_COOKIE,
+                default=defaults.get(CONF_WEB_COOKIE, ""),
+            ): str,
+            vol.Optional(
+                CONF_WEB_GRAPH_TOTAL_ID,
+                default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
+            ): str,
         }
     )
 
@@ -219,6 +247,15 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_ANOMALY_REDISTRIBUTION_WINDOW: int(user_input[CONF_ANOMALY_REDISTRIBUTION_WINDOW]),
         CONF_SMOOTHING_LOOKAROUND_DAYS: int(user_input[CONF_SMOOTHING_LOOKAROUND_DAYS]),
         CONF_CACHE_INTERVAL_PAYLOADS: user_input[CONF_CACHE_INTERVAL_PAYLOADS],
+        CONF_WEB_FALLBACK_ENABLED: user_input[CONF_WEB_FALLBACK_ENABLED],
+        CONF_WEB_BASE_URL: str(
+            user_input.get(CONF_WEB_BASE_URL) or DEFAULT_WEB_BASE_URL
+        ).rstrip("/"),
+        CONF_WEB_SESSION_ID: str(user_input.get(CONF_WEB_SESSION_ID) or "").strip(),
+        CONF_WEB_COOKIE: str(user_input.get(CONF_WEB_COOKIE) or "").strip(),
+        CONF_WEB_GRAPH_TOTAL_ID: str(
+            user_input.get(CONF_WEB_GRAPH_TOTAL_ID) or DEFAULT_WEB_GRAPH_TOTAL_ID
+        ).strip(),
     }
 
 

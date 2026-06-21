@@ -18,6 +18,11 @@ CONF_SMOOTH_INTERVAL_ANOMALIES = "smooth_interval_anomalies"
 CONF_ANOMALY_REDISTRIBUTION_WINDOW = "anomaly_redistribution_window"
 CONF_SMOOTHING_LOOKAROUND_DAYS = "smoothing_lookaround_days"
 CONF_CACHE_INTERVAL_PAYLOADS = "cache_interval_payloads"
+CONF_WEB_FALLBACK_ENABLED = "web_fallback_enabled"
+CONF_WEB_BASE_URL = "web_base_url"
+CONF_WEB_SESSION_ID = "web_session_id"
+CONF_WEB_COOKIE = "web_cookie"
+CONF_WEB_GRAPH_TOTAL_ID = "web_graph_total_id"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
 CONF_RUN_IN_BACKGROUND = "run_in_background"
 
@@ -47,6 +52,9 @@ DEFAULT_SMOOTH_INTERVAL_ANOMALIES = True
 DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW = 96
 DEFAULT_SMOOTHING_LOOKAROUND_DAYS = 5
 DEFAULT_CACHE_INTERVAL_PAYLOADS = True
+DEFAULT_WEB_FALLBACK_ENABLED = False
+DEFAULT_WEB_BASE_URL = "https://astra-cloud.com/astra04/readyxnet/source/pm"
+DEFAULT_WEB_GRAPH_TOTAL_ID = "-24557"
 
 MIN_POLL_INTERVAL = 60
 MAX_BACKFILL_DAYS = 3650
@@ -101,6 +109,9 @@ SENSOR_DISPLAY_NAMES = {
     "autarky": "Astra Autarky",
     "pv_co2_savings": "Astra PV CO2 Savings",
     "tax_rate": "Astra Energy Tax Rate",
+    "api_status": "Astra API Status",
+    "last_successful_source": "Astra Last Successful Source",
+    "web_session_status": "Astra Web Session Status",
 }
 SENSOR_OBJECT_IDS = {
     "power": "astra_power",
@@ -133,6 +144,9 @@ SENSOR_OBJECT_IDS = {
     "autarky": "astra_autarky",
     "pv_co2_savings": "astra_pv_co2_savings",
     "tax_rate": "astra_energy_tax_rate",
+    "api_status": "astra_api_status",
+    "last_successful_source": "astra_last_successful_source",
+    "web_session_status": "astra_web_session_status",
 }
 SENSOR_STATISTIC_LABELS = {
     "imported_energy": "grid energy",
@@ -149,6 +163,7 @@ SENSOR_STATISTIC_LABELS = {
 ISSUE_API_AUTH = "api_auth_failed"
 ISSUE_API_UNAVAILABLE = "api_unavailable"
 ISSUE_BACKFILL_FAILED = "backfill_failed"
+ISSUE_WEB_SESSION = "web_session_failed"
 
 SERVICE_BACKFILL_HISTORY = "backfill_history"
 

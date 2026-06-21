@@ -92,6 +92,15 @@ statistics = importlib.util.module_from_spec(statistics_spec)
 sys.modules[statistics_spec.name] = statistics
 statistics_spec.loader.exec_module(statistics)
 
+web_session_path = component_dir / "web_session.py"
+web_session_spec = importlib.util.spec_from_file_location(
+    "custom_components.astra_energy.web_session", web_session_path
+)
+assert web_session_spec and web_session_spec.loader
+web_session = importlib.util.module_from_spec(web_session_spec)
+sys.modules[web_session_spec.name] = web_session
+web_session_spec.loader.exec_module(web_session)
+
 
 def test_endpoint_key_strips_query() -> None:
     assert endpoint_key("https://example.test/api/x?a=1") == "https://example.test/api/x"
@@ -1168,7 +1177,7 @@ class FakeResponse:
     async def __aexit__(self, _exc_type, _exc, _tb):
         return False
 
-    async def text(self) -> str:
+    async def text(self, *_args, **_kwargs) -> str:
         return self._text
 
 
@@ -1191,6 +1200,19 @@ class EndpointSession:
     def post(self, url, **_kwargs):
         self.calls.append(url)
         return self.responses[url].pop(0)
+
+
+class FakeGetSession:
+    def __init__(self, response: FakeResponse | None = None, error: Exception | None = None) -> None:
+        self.response = response
+        self.error = error
+        self.calls: list[tuple[str, dict]] = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if self.error is not None:
+            raise self.error
+        return self.response
 
 
 def _verified_response(body: str, status: int = 200) -> FakeResponse:
@@ -1306,3 +1328,131 @@ def test_reporting_error_payload() -> None:
 def test_reporting_count_summary() -> None:
     assert reporting.summarize_counts({"b": 2, "a": 1}) == "a: 1, b: 2"
     assert reporting.summarize_counts({}) == "no readings"
+
+
+def test_web_graph_parser_and_classifier() -> None:
+    html = (
+        '<area TITLE="Gesamtbezug ist 100,50 kWh um 21.06.2026 12:15:00">'
+        '<area TITLE="Gesamtbezug ist 0,50 kWh um 21.06.2026 12:15:00">'
+    )
+
+    points = web_session.parse_graph_points(html)
+
+    assert len(points) == 1
+    assert points[0].cumulative_kwh == 100.5
+    assert points[0].interval_kwh == 0.5
+    assert web_session.classify_web_response(html, len(points)) == ("ok", None)
+
+
+def test_web_graph_parser_skips_unusable_values() -> None:
+    assert web_session.parse_graph_points(
+        '<area TITLE="Gesamtbezug ist - kWh um 21.06.2026 12:15:00">'
+    ) == []
+    assert web_session.parse_graph_points(
+        '<area TITLE="Gesamtbezug ist -1,00 kWh um 21.06.2026 12:15:00">'
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("html", "status"),
+    [
+        ('<form><div class="g-recaptcha"></div></form>', "login_required"),
+        ("Ihre session ist abgelaufen", "expired"),
+        ("", "invalid_response"),
+        ("<html>no graph data here</html>", "no_data"),
+    ],
+)
+def test_web_response_classifier_reports_actionable_states(html: str, status: str) -> None:
+    classified, message = web_session.classify_web_response(html, 0)
+
+    assert classified == status
+    if status != "invalid_response":
+        assert message
+
+
+def test_web_session_check_reports_missing_configuration() -> None:
+    status = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(),
+            session_id="",
+            cookie="",
+        )
+    )
+
+    assert status.status == "not_configured"
+    assert status.as_dict()["status"] == "not_configured"
+
+
+def test_web_session_check_reports_incomplete_configuration() -> None:
+    missing_session = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(),
+            session_id="",
+            cookie="sid=secret",
+        )
+    )
+    assert missing_session.status == "missing_session_id"
+
+    missing_cookie = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(),
+            session_id="abc",
+            cookie="",
+        )
+    )
+    assert missing_cookie.status == "missing_cookie"
+
+
+def test_web_session_check_reports_unreachable_and_logged_out() -> None:
+    unreachable = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(error=OSError("network down")),
+            session_id="abc",
+            cookie="sid=secret",
+        )
+    )
+    assert unreachable.status == "unreachable"
+    assert "network down" in unreachable.message
+
+    logged_out = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(response=FakeResponse('<form action="csloginw.php">Passwort</form>')),
+            session_id="abc",
+            cookie="sid=secret",
+        )
+    )
+    assert logged_out.status == "login_required"
+
+
+def test_web_session_check_reports_http_errors() -> None:
+    status = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(response=FakeResponse("server error", status=503)),
+            session_id="abc",
+            cookie="sid=secret",
+        )
+    )
+
+    assert status.status == "unreachable"
+    assert status.message == "Astra web graph returned HTTP 503"
+    assert status.response_bytes == len("server error")
+
+
+def test_web_session_check_reports_valid_cookie_session() -> None:
+    html = (
+        '<area TITLE="Gesamtbezug ist 100,50 kWh um 21.06.2026 12:15:00">'
+        '<area TITLE="Gesamtbezug ist 0,50 kWh um 21.06.2026 12:15:00">'
+    )
+    session = FakeGetSession(response=FakeResponse(html))
+
+    status = asyncio.run(
+        web_session.async_check_web_session(
+            session,
+            session_id="abc",
+            cookie="sid=secret",
+        )
+    )
+
+    assert status.status == "ok"
+    assert status.point_count == 1
+    assert session.calls[0][1]["headers"]["Cookie"] == "sid=secret"

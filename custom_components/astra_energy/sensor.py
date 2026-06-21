@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import AstraMeterReading
@@ -32,6 +33,30 @@ class AstraSensorEntityDescription(SensorEntityDescription):
     """Astra sensor description."""
 
     value_attr: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class AstraCoordinatorSensorEntityDescription(SensorEntityDescription):
+    """Coordinator-level Astra diagnostic sensor description."""
+
+
+COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, ...] = (
+    AstraCoordinatorSensorEntityDescription(
+        key="api_status",
+        translation_key="api_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    AstraCoordinatorSensorEntityDescription(
+        key="last_successful_source",
+        translation_key="last_successful_source",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    AstraCoordinatorSensorEntityDescription(
+        key="web_session_status",
+        translation_key="web_session_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+)
 
 
 SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
@@ -282,6 +307,10 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Set up Astra Energy sensors."""
     coordinator: AstraEnergyCoordinator = entry.runtime_data
     known_meter_ids: set[str] = set()
+    async_add_entities(
+        AstraCoordinatorSensor(coordinator, description)
+        for description in COORDINATOR_SENSOR_DESCRIPTIONS
+    )
 
     def _add_new_entities() -> None:
         entities: list[AstraEnergySensor] = []
@@ -375,4 +404,60 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
             "model": "Energy meter",
             "name": "Astra Energy Meter",
             "serial_number": reading.raw_meter_id if reading else self._meter_id,
+        }
+
+
+class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity):
+    """Sensor backed by coordinator status rather than one meter field."""
+
+    entity_description: AstraCoordinatorSensorEntityDescription
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        coordinator: AstraEnergyCoordinator,
+        description: AstraCoordinatorSensorEntityDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        entry_id = coordinator.config_entry.entry_id
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_{description.key}"
+        self._attr_name = SENSOR_DISPLAY_NAMES[description.key]
+        self._attr_suggested_object_id = SENSOR_OBJECT_IDS[description.key]
+
+    @property
+    def name(self) -> str | None:
+        """Return a friendly name."""
+        return SENSOR_DISPLAY_NAMES[self.entity_description.key]
+
+    @property
+    def native_value(self):
+        """Return coordinator status."""
+        if self.entity_description.key == "api_status":
+            return self.coordinator.api_status
+        if self.entity_description.key == "last_successful_source":
+            return self.coordinator.last_successful_source
+        if self.entity_description.key == "web_session_status":
+            return self.coordinator.web_session_status.get("status")
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return debug-safe coordinator status attributes."""
+        attributes: dict[str, object] = {ATTR_SOURCE: DOMAIN}
+        if self.entity_description.key == "api_status":
+            attributes["last_error"] = self.coordinator.last_error
+            attributes["last_update_success"] = self.coordinator.last_update_success
+        if self.entity_description.key == "web_session_status":
+            attributes.update(self.coordinator.web_session_status)
+        return attributes
+
+    @property
+    def device_info(self):
+        """Return integration device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.config_entry.entry_id)},
+            "manufacturer": "Astra",
+            "model": "Energy integration",
+            "name": "Astra Energy",
         }

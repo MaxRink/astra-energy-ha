@@ -28,7 +28,12 @@
           "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
           "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
           "smoothing_lookaround_days": "Tage für Glättungsvergleich",
-          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern",
+          "web_fallback_enabled": "Manuellen Web-Sitzungs-Fallback aktivieren",
+          "web_base_url": "Web-Graph-Basis-URL",
+          "web_session_id": "Web-sessionId",
+          "web_cookie": "Web-Cookie-Header",
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
         },
         "data_description": {
           "username": "Astra-Cockpit-Benutzername.",
@@ -46,7 +51,12 @@
           "smooth_interval_anomalies": "Verzögerte Provider-Spitzen auf vorherige fehlende Blöcke verteilen, statt betroffene Stunden als fehlende Daten zu lassen.",
           "anomaly_redistribution_window": "Maximale Anzahl vorheriger 15-Minuten-Blöcke, über die eine verzögerte Spitze verteilt werden darf.",
           "smoothing_lookaround_days": "Gleiche Tageszeiten benachbarter Tage für Glättungsgewichte verwenden. 0 nutzt nur die Kanalform desselben Tages.",
-          "cache_interval_payloads": "Ältere tägliche Intervallantworten nach dem ersten Abruf nicht erneut herunterladen. Aktuelle Stunden werden weiterhin aktualisiert."
+          "cache_interval_payloads": "Ältere tägliche Intervallantworten nach dem ersten Abruf nicht erneut herunterladen. Aktuelle Stunden werden weiterhin aktualisiert.",
+          "web_fallback_enabled": "Eine bereits eingeloggte Astra-Browser-Sitzung als Fallback- und Diagnosekanal prüfen.",
+          "web_base_url": "Astra-Webportal-Verzeichnis für Graphen. Standardwert beibehalten, sofern Astra den Portalpfad nicht ändert.",
+          "web_session_id": "sessionId aus einer eingeloggten Astra-Web-URL. Wird im Konfigurationseintrag gespeichert und in Diagnosen redigiert.",
+          "web_cookie": "Vollständiger Cookie-Header aus der eingeloggten Browser-Sitzung. Wird im Konfigurationseintrag gespeichert und in Diagnosen redigiert.",
+          "web_graph_total_id": "Astra-pm_graph.php-ID, mit der der Zugriff auf den Gesamtenergie-Graphen geprüft wird."
         }
       },
       "reauth_confirm": {
@@ -76,7 +86,12 @@
           "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
           "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
           "smoothing_lookaround_days": "Tage für Glättungsvergleich",
-          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern",
+          "web_fallback_enabled": "Manuellen Web-Sitzungs-Fallback aktivieren",
+          "web_base_url": "Web-Graph-Basis-URL",
+          "web_session_id": "Web-sessionId",
+          "web_cookie": "Web-Cookie-Header",
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
         },
         "data_description": {}
       }
@@ -99,7 +114,12 @@
           "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
           "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
           "smoothing_lookaround_days": "Tage für Glättungsvergleich",
-          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern",
+          "web_fallback_enabled": "Manuellen Web-Sitzungs-Fallback aktivieren",
+          "web_base_url": "Web-Graph-Basis-URL",
+          "web_session_id": "Web-sessionId",
+          "web_cookie": "Web-Cookie-Header",
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
         }
       }
     }
@@ -168,6 +188,10 @@
     "backfill_failed": {
       "title": "Astra-Energy-Rückimport fehlgeschlagen",
       "description": "Astra Energy konnte historische Statistiken nicht importieren. Letzter Fehler: {error}"
+    },
+    "web_session_failed": {
+      "title": "Astra-Energy-Web-Sitzung fehlgeschlagen",
+      "description": "Der optionale Browser-Sitzungs-Fallback ist konfiguriert, aber nicht nutzbar. Aktualisiere sessionId/Cookie in den Integrationsoptionen oder deaktiviere den Fallback. Letzter Fehler: {error}"
     }
   },
   "entity": {
@@ -261,6 +285,15 @@
       },
       "tax_rate": {
         "name": "Energiesteuersatz"
+      },
+      "api_status": {
+        "name": "API-Status"
+      },
+      "last_successful_source": {
+        "name": "Letzte erfolgreiche Quelle"
+      },
+      "web_session_status": {
+        "name": "Web-Sitzungsstatus"
       }
     }
   }

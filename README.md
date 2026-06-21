@@ -82,9 +82,19 @@ When the mobile endpoints are unavailable but you have a working browser
 session, use the manual cookie fallback without another CDP capture:
 
 ```sh
-# fill ASTRA_WEB_SESSION_ID and ASTRA_WEB_COOKIE in .secrets.env from the browser
+# from a Chrome instance already started with --remote-debugging-port=9222
+python3 tools/astra_cdp_cookie_export.py --write-env .secrets.env
+
+# then test the captured session against the web graph endpoint
 python3 tools/astra_web_probe.py --start "2026-06-21 00:00:00" --end "2026-06-22 00:00:00"
 ```
+
+The exporter prints only a redacted summary by default. It writes
+`ASTRA_WEB_SESSION_ID` and `ASTRA_WEB_COOKIE` into `.secrets.env`, which is
+gitignored. The Home Assistant integration exposes the same web-session fallback
+settings in the UI and creates diagnostic sensors plus repair issues when the
+stored session is missing, expired, logged out, unreachable, or returning
+malformed graph data.
 
 Create sanitized API docs from the capture:
 
