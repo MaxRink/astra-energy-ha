@@ -144,6 +144,8 @@ def test_small_parsing_helpers_cover_missing_values() -> None:
     assert astra_api._cost_gross(10.0, 0.5) == 5.0
     assert astra_api._cost_gross(None, 0.5) is None
     assert astra_api._cost_gross(10.0, None) is None
+    assert astra_api._cost_gross(-10.0, 0.5) is None
+    assert astra_api._cost_gross(10.0, -0.5) is None
     assert astra_api._parse_datetime(None) is None
     assert astra_api._parse_datetime("not a date") is None
     assert astra_api._normalize_identifier(None) is None
@@ -661,6 +663,10 @@ def test_interval_sanitizer_rejects_negative_values() -> None:
                 "total_kwh": -1.0,
                 "solar_kwh": 0.0,
                 "grid_kwh": -1.0,
+                "raw_grid_kwh": -1.0,
+                "unsmoothed_total_kwh": -1.0,
+                "unsmoothed_solar_kwh": 0.0,
+                "unsmoothed_grid_kwh": -1.0,
             },
             {
                 "timestamp": dt.datetime(2026, 6, 15, 0, 30, tzinfo=dt.UTC),
@@ -673,8 +679,11 @@ def test_interval_sanitizer_rejects_negative_values() -> None:
     )
 
     assert sanitized[0]["valid"] is False
+    assert sanitized[0]["unsmoothed_total_kwh"] == 0.0
+    assert sanitized[0]["unsmoothed_grid_kwh"] == 0.0
     assert sanitized[1]["valid"] is True
     assert report["total_kwh_negative_rejected"] == 1
+    assert report["raw_grid_kwh_negative_rejected"] == 1
 
 
 def test_daily_interval_clamps_solar_to_total() -> None:

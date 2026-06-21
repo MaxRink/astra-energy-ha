@@ -148,7 +148,7 @@ def _round_or_none(value: float | None, digits: int = 6) -> float | None:
 
 def _cost_gross(kwh: float | None, price_gross: float | None) -> float | None:
     """Return gross cost for an energy amount and price."""
-    if kwh is None or price_gross is None:
+    if kwh is None or price_gross is None or kwh < 0 or price_gross < 0:
         return None
     return round(kwh * price_gross, 4)
 
@@ -618,7 +618,7 @@ def _sanitize_interval_points(
     max_interval_kwh = max_average_kw / 4.0
     for point in sanitized:
         point["valid"] = True
-        for key in ("total_kwh", "solar_kwh"):
+        for key in ("total_kwh", "solar_kwh", "raw_grid_kwh"):
             value = float(point.get(key) or 0.0)
             if value < 0:
                 point[key] = None
@@ -627,6 +627,9 @@ def _sanitize_interval_points(
                 report[f"{key}_negative_rejected"] = (
                     report.get(f"{key}_negative_rejected", 0) + 1
                 )
+        if not point["valid"]:
+            for key in ("unsmoothed_total_kwh", "unsmoothed_solar_kwh", "unsmoothed_grid_kwh"):
+                point[key] = 0.0
     for key in ("total_kwh", "solar_kwh"):
         _redistribute_interval_spikes(
             sanitized,

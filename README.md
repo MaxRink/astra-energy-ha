@@ -136,7 +136,26 @@ quarter-hour values, and object/grid split controls. Details are documented in
 
 ## Home Assistant Development
 
-Copy or symlink `custom_components/astra_energy` into a Home Assistant config directory, restart HA, then add the integration from the UI.
+### HACS Installation
+
+This repository is HACS-compatible as a custom integration. For the private
+repository, make sure HACS has GitHub access to `MaxRink/astra-energy-ha`, then
+add it as a custom repository:
+
+```text
+HACS -> Integrations -> Custom repositories
+Repository: https://github.com/MaxRink/astra-energy-ha
+Category: Integration
+```
+
+Install `Astra Energy`, restart Home Assistant, then add the integration from
+Settings -> Devices & services. Alpha releases are tagged with
+`v0.1.0-alpha.1` style versions.
+
+### Manual Development Install
+
+Copy or symlink `custom_components/astra_energy` into a Home Assistant config
+directory, restart HA, then add the integration from the UI.
 
 The current implementation authenticates through `csandroid.php` and creates
 Energy Dashboard-compatible `kWh` sensors from the latest meter-reading endpoint
