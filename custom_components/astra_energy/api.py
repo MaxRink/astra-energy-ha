@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from hashlib import md5
+import asyncio
 import json
 import re
 from typing import TYPE_CHECKING, Any
+
+from .const import DAILY_INTERVAL_CONCURRENCY
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -74,6 +77,11 @@ def _checksum(action: str, timestamp: str) -> str:
 def _session_id(username: str, password: str) -> str:
     """Return Astra Android session id for username/password."""
     return _md5(f"{username}{_md5(password)}")
+
+
+def _total_or_zero(value: float | None) -> float:
+    """Return a cumulative meter value or zero when Astra omitted it."""
+    return value if value is not None else 0.0
 
 
 def _parse_number(value: Any) -> float | None:
@@ -601,54 +609,57 @@ class AstraClient:
         if not self._authenticated:
             await self.async_login()
 
-        expanded_start_date = _first_day_of_month(start.date())
-        anchor_start_date = _previous_month(expanded_start_date)
-        anchor_start = _combine_utc(anchor_start_date)
-        monthly_readings = await self.async_get_historical_meter_stands(anchor_start, end)
-        monthly_anchors = _latest_reading_by_month(monthly_readings)
-        template = monthly_readings[-1] if monthly_readings else None
+        latest_readings = await self._read_latest_meter_stands()
+        template = latest_readings[0] if latest_readings else None
         if template is None:
-            latest = await self._read_latest_meter_stands()
-            template = latest[0] if latest else None
+            monthly_readings = await self.async_get_historical_meter_stands(start, end)
+            template = monthly_readings[-1] if monthly_readings else None
 
-        month_totals: dict[tuple[int, int], dict[str, float]] = {}
+        days = _iter_days(start.date(), end.date())
+        semaphore = asyncio.Semaphore(DAILY_INTERVAL_CONCURRENCY)
+
+        async def fetch_day(day: date) -> tuple[date, dict[str, Any]]:
+            async with semaphore:
+                return (
+                    day,
+                    await self._get_json(
+                        "get_mtr_eb",
+                        s_year=str(day.year),
+                        s_mnt=str(day.month),
+                        s_datum=day.isoformat(),
+                    ),
+                )
+
+        payloads = await asyncio.gather(*(fetch_day(day) for day in days))
+        points = [
+            point
+            for day, data in sorted(payloads, key=lambda item: item[0])
+            for point in _daily_interval_values_from_payload(data, day)
+            if start <= point["timestamp"] <= end
+        ]
+
+        end_total = _total_or_zero(template.total_kwh if template else None)
+        end_solar = _total_or_zero(template.solar_kwh_total if template else None)
+        end_grid = _total_or_zero(template.grid_kwh_total if template else None)
+        if end_grid == 0.0 and end_total > 0.0:
+            end_grid = max(end_total - end_solar, 0.0)
+        totals = {
+            "grid": max(end_grid - sum(point["grid_kwh"] for point in points), 0.0),
+            "solar": max(end_solar - sum(point["solar_kwh"] for point in points), 0.0),
+            "total": max(end_total - sum(point["total_kwh"] for point in points), 0.0),
+        }
         readings: list[AstraMeterReading] = []
-        for day in _iter_days(expanded_start_date, end.date()):
-            month_key = (day.year, day.month)
-            if month_key not in month_totals:
-                base = monthly_anchors.get(_previous_month(day))
-                base_total = base.total_kwh if base and base.total_kwh is not None else 0.0
-                base_solar = (
-                    base.solar_kwh_total if base and base.solar_kwh_total is not None else 0.0
+        for point in sorted(points, key=lambda item: item["timestamp"]):
+            totals["total"] += point["total_kwh"]
+            totals["solar"] += point["solar_kwh"]
+            totals["grid"] += point["grid_kwh"]
+            readings.append(
+                _reading_from_interval_point(
+                    point,
+                    totals,
+                    template=template,
                 )
-                base_grid = max(base_total - base_solar, 0.0)
-                month_totals[month_key] = {
-                    "grid": base_grid,
-                    "solar": base_solar,
-                    "total": base_total,
-                }
-
-            data = await self._get_json(
-                "get_mtr_eb",
-                s_year=str(day.year),
-                s_mnt=str(day.month),
-                s_datum=day.isoformat(),
             )
-            for point in _daily_interval_values_from_payload(data, day):
-                totals = month_totals[month_key]
-                totals["total"] += point["total_kwh"]
-                totals["solar"] += point["solar_kwh"]
-                totals["grid"] += point["grid_kwh"]
-                timestamp = point["timestamp"]
-                if not (start <= timestamp <= end):
-                    continue
-                readings.append(
-                    _reading_from_interval_point(
-                        point,
-                        totals,
-                        template=template,
-                    )
-                )
         return readings
 
     async def _read_latest_meter_stands(self) -> list[AstraMeterReading]:

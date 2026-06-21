@@ -29,3 +29,7 @@ backfill_history:
       required: false
       selector:
         text:
+    run_in_background:
+      required: false
+      selector:
+        boolean:

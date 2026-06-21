@@ -18,6 +18,7 @@ from .const import (
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
+    CONF_RUN_IN_BACKGROUND,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
@@ -42,6 +43,7 @@ _SERVICE_SCHEMA = vol.Schema(
         vol.Optional(CONF_IMPORT_STATISTICS): bool,
         vol.Optional(CONF_HISTORY_GRANULARITY): vol.In(HISTORY_GRANULARITIES),
         vol.Optional(CONF_CONFIG_ENTRY_ID): str,
+        vol.Optional(CONF_RUN_IN_BACKGROUND, default=False): bool,
     }
 )
 
@@ -93,6 +95,11 @@ async def _async_backfill_history(
     return response
 
 
+async def _async_background_backfill(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Run a backfill task in the background and let HA log unexpected failures."""
+    await _async_backfill_history(hass, call)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) -> bool:
     """Set up Astra Energy from a config entry."""
     coordinator = AstraEnergyCoordinator(
@@ -114,6 +121,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
     if not hass.services.has_service(DOMAIN, SERVICE_BACKFILL_HISTORY):
 
         async def _async_handle_backfill(call: ServiceCall) -> dict[str, dict[str, int]]:
+            if call.data.get(CONF_RUN_IN_BACKGROUND):
+                hass.async_create_task(_async_background_backfill(hass, call))
+                return {"started": {"entries": len(hass.data.get(DOMAIN, {}))}}
             return await _async_backfill_history(hass, call)
 
         hass.services.async_register(

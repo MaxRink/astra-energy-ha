@@ -95,6 +95,10 @@
         "config_entry_id": {
           "name": "Config entry ID",
           "description": "Optional loaded Astra Energy config entry ID. Leave empty to backfill all loaded Astra Energy entries."
+        },
+        "run_in_background": {
+          "name": "Run in background",
+          "description": "Start the backfill as a background task and return immediately. Useful for long quarter-hour imports behind reverse proxies."
         }
       }
     }
