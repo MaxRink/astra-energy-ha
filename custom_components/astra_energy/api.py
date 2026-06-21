@@ -13,12 +13,14 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from .const import (
-    ANOMALY_REDISTRIBUTION_WINDOW,
     DAILY_INTERVAL_CONCURRENCY,
+    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_GRID_PRICE_NET,
+    DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
-    MAX_INTERVAL_AVERAGE_KW,
 )
 
 if TYPE_CHECKING:
@@ -55,6 +57,9 @@ class AstraMeterReading:
     grid_kwh_total: float | None = None
     solar_kwh_total: float | None = None
     total_kwh: float | None = None
+    unsmoothed_grid_kwh_total: float | None = None
+    unsmoothed_solar_kwh_total: float | None = None
+    unsmoothed_total_kwh: float | None = None
     raw_grid_kwh_total: float | None = None
     exported_kwh_total: float | None = None
     cost_total: float | None = None
@@ -266,6 +271,8 @@ def _reading_from_channel(channel: dict[str, Any]) -> AstraMeterReading:
         imported_kwh_total=total,
         grid_kwh_total=total,
         total_kwh=total,
+        unsmoothed_grid_kwh_total=total,
+        unsmoothed_total_kwh=total,
         raw_meter_id=channel["raw_meter_id"],
         legacy_meter_id=channel["legacy_meter_id"],
         raw={
@@ -309,6 +316,9 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
         grid_kwh_total=grid_total,
         solar_kwh_total=solar_total,
         total_kwh=total_kwh,
+        unsmoothed_grid_kwh_total=grid_total,
+        unsmoothed_solar_kwh_total=solar_total,
+        unsmoothed_total_kwh=total_kwh,
         raw_grid_kwh_total=raw_grid_total,
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
@@ -414,9 +424,30 @@ def _series_value(series: dict[str, list[float]], name: str, index: int) -> floa
 
 
 def _redistribution_weights(
-    points: list[dict[str, Any]], indexes: list[int], weight_keys: tuple[str, ...]
+    points: list[dict[str, Any]],
+    indexes: list[int],
+    weight_keys: tuple[str, ...],
+    *,
+    key: str,
+    lookaround_days: int,
 ) -> list[float]:
     """Return normalized weights for redistributing a delayed interval value."""
+    if lookaround_days > 0:
+        profile_weights = []
+        for index in indexes:
+            timestamp = points[index]["timestamp"]
+            bucket_weight = 0.0
+            for other in points:
+                if other is points[index] or not other.get("valid", True):
+                    continue
+                if abs((other["timestamp"].date() - timestamp.date()).days) > lookaround_days:
+                    continue
+                if other["timestamp"].time() == timestamp.time():
+                    bucket_weight += max(float(other.get(key) or 0.0), 0.0)
+            profile_weights.append(bucket_weight)
+        if any(profile_weights):
+            total = sum(profile_weights)
+            return [weight / total for weight in profile_weights]
     weights = []
     for index in indexes:
         weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
@@ -427,11 +458,22 @@ def _redistribution_weights(
     return [weight / total for weight in weights]
 
 
+def _interval_hour_start(timestamp: datetime) -> datetime:
+    """Return the recorder hour bucket for an interval-end timestamp."""
+    start = timestamp.replace(minute=0, second=0, microsecond=0)
+    if timestamp == start:
+        return start - timedelta(hours=1)
+    return start
+
+
 def _redistribute_interval_spikes(
     points: list[dict[str, Any]],
     key: str,
     *,
     max_interval_kwh: float,
+    smooth_anomalies: bool,
+    redistribution_window: int,
+    smoothing_lookaround_days: int,
     report: dict[str, int],
 ) -> None:
     """Redistribute implausible delayed values over preceding flat buckets."""
@@ -441,17 +483,24 @@ def _redistribute_interval_spikes(
         if value <= max_interval_kwh:
             continue
         start = index
-        while start > 0 and index - start < ANOMALY_REDISTRIBUTION_WINDOW:
+        while start > 0 and index - start < redistribution_window:
             previous = float(points[start - 1].get(key) or 0.0)
             if previous > 0.001:
                 break
             start -= 1
         indexes = list(range(start, index + 1))
-        if len(indexes) <= 1:
-            point[key] = 0.0
+        if not smooth_anomalies or len(indexes) <= 1:
+            point["valid"] = False
+            point.setdefault("anomalies", []).append(f"{key}_spike")
             report[f"{key}_rejected"] = report.get(f"{key}_rejected", 0) + 1
             continue
-        weights = _redistribution_weights(points, indexes, weight_keys)
+        weights = _redistribution_weights(
+            points,
+            indexes,
+            weight_keys,
+            key=key,
+            lookaround_days=smoothing_lookaround_days,
+        )
         for target_index, weight in zip(indexes, weights, strict=False):
             points[target_index][key] = value * weight
         report[f"{key}_redistributed"] = report.get(f"{key}_redistributed", 0) + 1
@@ -463,17 +512,23 @@ def _redistribute_interval_spikes(
 def _sanitize_interval_points(
     points: list[dict[str, Any]],
     *,
-    max_average_kw: float = MAX_INTERVAL_AVERAGE_KW,
+    max_average_kw: float = DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    smooth_anomalies: bool = DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    redistribution_window: int = DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+    smoothing_lookaround_days: int = DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Reject or smooth impossible interval values before cumulative import."""
     sanitized = [{**point} for point in sorted(points, key=lambda item: item["timestamp"])]
     report: dict[str, int] = {}
     max_interval_kwh = max_average_kw / 4.0
     for point in sanitized:
+        point["valid"] = True
         for key in ("total_kwh", "solar_kwh"):
             value = float(point.get(key) or 0.0)
             if value < 0:
-                point[key] = 0.0
+                point[key] = None
+                point["valid"] = False
+                point.setdefault("anomalies", []).append(f"{key}_negative")
                 report[f"{key}_negative_rejected"] = (
                     report.get(f"{key}_negative_rejected", 0) + 1
                 )
@@ -482,9 +537,14 @@ def _sanitize_interval_points(
             sanitized,
             key,
             max_interval_kwh=max_interval_kwh,
+            smooth_anomalies=smooth_anomalies,
+            redistribution_window=redistribution_window,
+            smoothing_lookaround_days=smoothing_lookaround_days,
             report=report,
         )
     for point in sanitized:
+        if not point.get("valid", True):
+            continue
         total = max(float(point.get("total_kwh") or 0.0), 0.0)
         solar = max(float(point.get("solar_kwh") or 0.0), 0.0)
         if solar > total:
@@ -493,19 +553,20 @@ def _sanitize_interval_points(
             report["solar_kwh_clamped_to_total"] = report.get("solar_kwh_clamped_to_total", 0) + 1
         point["grid_kwh"] = max(total - solar, 0.0)
         if point["grid_kwh"] > max_interval_kwh:
-            excess = point["grid_kwh"] - max_interval_kwh
-            point["grid_kwh"] = max_interval_kwh
-            point["total_kwh"] = point["solar_kwh"] + max_interval_kwh
+            point["valid"] = False
+            point.setdefault("anomalies", []).append("grid_kwh_spike")
             report["grid_kwh_capped"] = report.get("grid_kwh_capped", 0) + 1
-            if excess > 0:
-                report["grid_kwh_excess_rejected"] = report.get(
-                    "grid_kwh_excess_rejected", 0
-                ) + 1
     return sanitized, report
 
 
 def _daily_interval_values_and_report_from_payload(
-    data: dict[str, Any], day: date
+    data: dict[str, Any],
+    day: date,
+    *,
+    max_average_kw: float = DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    smooth_anomalies: bool = DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    redistribution_window: int = DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+    smoothing_lookaround_days: int = DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Parse one `get_mtr_eb` daily payload into sanitized 15-minute values."""
     rows = data.get("data") or []
@@ -536,11 +597,20 @@ def _daily_interval_values_and_report_from_payload(
                 "total_kwh": total,
                 "solar_kwh": solar,
                 "grid_kwh": max(total - solar, 0.0),
+                "unsmoothed_total_kwh": total,
+                "unsmoothed_solar_kwh": solar,
+                "unsmoothed_grid_kwh": max(total - solar, 0.0),
                 "raw_grid_kwh": raw_grid,
                 "battery_kwh": battery,
             }
         )
-    sanitized, _report = _sanitize_interval_points(points)
+    sanitized, _report = _sanitize_interval_points(
+        points,
+        max_average_kw=max_average_kw,
+        smooth_anomalies=smooth_anomalies,
+        redistribution_window=redistribution_window,
+        smoothing_lookaround_days=smoothing_lookaround_days,
+    )
     return sanitized, _report
 
 
@@ -633,6 +703,10 @@ class AstraClient:
         grid_price_net: float = DEFAULT_GRID_PRICE_NET,
         solar_price_net: float = DEFAULT_SOLAR_PRICE_NET,
         tax_rate: float = DEFAULT_TAX_RATE,
+        max_interval_average_kw: float = DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+        smooth_interval_anomalies: bool = DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+        anomaly_redistribution_window: int = DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+        smoothing_lookaround_days: int = DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     ) -> None:
         self._session = session
         self._username = username
@@ -650,6 +724,10 @@ class AstraClient:
         self._grid_price_net = float(grid_price_net)
         self._solar_price_net = float(solar_price_net)
         self._tax_rate = float(tax_rate)
+        self._max_interval_average_kw = float(max_interval_average_kw)
+        self._smooth_interval_anomalies = bool(smooth_interval_anomalies)
+        self._anomaly_redistribution_window = int(anomaly_redistribution_window)
+        self._smoothing_lookaround_days = int(smoothing_lookaround_days)
 
     async def _post_action(self, action: str, **params: str) -> str:  # pragma: no cover
         """POST one Android API action and verify Astra's MD5 response suffix."""
@@ -671,14 +749,19 @@ class AstraClient:
     async def _post_raw(self, payload: dict[str, str]) -> str:  # pragma: no cover
         """POST form data and return the checksum-verified body payload."""
         payload = {**payload, "s_dv": "1"}
-        async with self._session.post(
-            self._base_url,
-            data=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        ) as response:
-            text = await response.text()
-            if response.status >= 400:
-                raise AstraApiError(f"Astra HTTP {response.status}")
+        try:
+            async with self._session.post(
+                self._base_url,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            ) as response:
+                text = await response.text()
+                if response.status >= 400:
+                    raise AstraApiError(f"Astra HTTP {response.status}")
+        except AstraApiError:
+            raise
+        except Exception as err:  # noqa: BLE001
+            raise AstraApiError(f"Astra request failed: {type(err).__name__}: {err}") from err
         if len(text) < 32:
             raise AstraProtocolError("Astra response is too short")
         body = text[:-32]
@@ -784,6 +867,15 @@ class AstraClient:
                     grid_kwh_total=balance_values.get("grid_kwh_total") or first.grid_kwh_total,
                     solar_kwh_total=balance_values.get("solar_kwh_total") or first.solar_kwh_total,
                     total_kwh=balance_values.get("total_kwh") or first.total_kwh,
+                    unsmoothed_grid_kwh_total=(
+                        balance_values.get("grid_kwh_total") or first.unsmoothed_grid_kwh_total
+                    ),
+                    unsmoothed_solar_kwh_total=(
+                        balance_values.get("solar_kwh_total") or first.unsmoothed_solar_kwh_total
+                    ),
+                    unsmoothed_total_kwh=(
+                        balance_values.get("total_kwh") or first.unsmoothed_total_kwh
+                    ),
                     raw={
                         **(first.raw or {}),
                         "energy_balance": {
@@ -922,10 +1014,30 @@ class AstraClient:
         *,
         payload_cache: dict[str, dict[str, Any]] | None = None,
         cache_before: datetime | None = None,
+        max_average_kw: float | None = None,
+        smooth_anomalies: bool | None = None,
+        redistribution_window: int | None = None,
+        smoothing_lookaround_days: int | None = None,
     ) -> list[AstraMeterReading]:
         """Fetch 15-minute energy balance intervals as cumulative readings."""
         if not self._authenticated:
             await self.async_login()
+        max_average_kw = (
+            self._max_interval_average_kw if max_average_kw is None else max_average_kw
+        )
+        smooth_anomalies = (
+            self._smooth_interval_anomalies if smooth_anomalies is None else smooth_anomalies
+        )
+        redistribution_window = (
+            self._anomaly_redistribution_window
+            if redistribution_window is None
+            else redistribution_window
+        )
+        smoothing_lookaround_days = (
+            self._smoothing_lookaround_days
+            if smoothing_lookaround_days is None
+            else smoothing_lookaround_days
+        )
 
         latest_readings = await self._read_latest_meter_stands()
         template = latest_readings[0] if latest_readings else None
@@ -959,12 +1071,33 @@ class AstraClient:
 
         payloads = await asyncio.gather(*(fetch_day(day) for day in days))
         points = []
+        invalid_hours: set[datetime] = set()
         anomaly_report: dict[str, int] = {}
         for day, data in sorted(payloads, key=lambda item: item[0]):
-            day_points, day_report = _daily_interval_values_and_report_from_payload(data, day)
+            day_points, day_report = _daily_interval_values_and_report_from_payload(
+                data,
+                day,
+                max_average_kw=max_average_kw,
+                smooth_anomalies=smooth_anomalies,
+                redistribution_window=redistribution_window,
+                smoothing_lookaround_days=smoothing_lookaround_days,
+            )
             for key, value in day_report.items():
                 anomaly_report[key] = anomaly_report.get(key, 0) + value
-            points.extend(point for point in day_points if start <= point["timestamp"] <= end)
+            for point in day_points:
+                if not (start <= point["timestamp"] <= end):
+                    continue
+                if not point.get("valid", True):
+                    invalid_hours.add(_interval_hour_start(point["timestamp"]))
+                    continue
+                points.append(point)
+        if invalid_hours:
+            points = [
+                point
+                for point in points
+                if _interval_hour_start(point["timestamp"]) not in invalid_hours
+            ]
+            anomaly_report["missing_hour_buckets"] = len(invalid_hours)
         if anomaly_report:
             _LOGGER.warning(
                 "Astra sanitized historical interval payloads: %s",
@@ -987,12 +1120,24 @@ class AstraClient:
             "grid": max(end_grid - sum(point["grid_kwh"] for point in points), 0.0),
             "solar": max(end_solar - sum(point["solar_kwh"] for point in points), 0.0),
             "total": max(end_total - sum(point["total_kwh"] for point in points), 0.0),
+            "unsmoothed_grid": max(
+                end_grid - sum(point["unsmoothed_grid_kwh"] for point in points), 0.0
+            ),
+            "unsmoothed_solar": max(
+                end_solar - sum(point["unsmoothed_solar_kwh"] for point in points), 0.0
+            ),
+            "unsmoothed_total": max(
+                end_total - sum(point["unsmoothed_total_kwh"] for point in points), 0.0
+            ),
         }
         readings: list[AstraMeterReading] = []
         for point in sorted(points, key=lambda item: item["timestamp"]):
             totals["total"] += point["total_kwh"]
             totals["solar"] += point["solar_kwh"]
             totals["grid"] += point["grid_kwh"]
+            totals["unsmoothed_total"] += point["unsmoothed_total_kwh"]
+            totals["unsmoothed_solar"] += point["unsmoothed_solar_kwh"]
+            totals["unsmoothed_grid"] += point["unsmoothed_grid_kwh"]
             readings.append(
                 _reading_from_interval_point(
                     point,
@@ -1094,6 +1239,8 @@ class AstraClient:
                     imported_kwh_total=value,
                     grid_kwh_total=value,
                     total_kwh=value,
+                    unsmoothed_grid_kwh_total=value,
+                    unsmoothed_total_kwh=value,
                     legacy_meter_id=meter_id,
                     raw={"action": "get_mtr_vb_overview", "unit": row.get("v03")},
                 )
@@ -1191,6 +1338,9 @@ def _reading_from_interval_point(
         grid_kwh_total=totals["grid"],
         solar_kwh_total=totals["solar"],
         total_kwh=totals["total"],
+        unsmoothed_grid_kwh_total=totals.get("unsmoothed_grid", totals["grid"]),
+        unsmoothed_solar_kwh_total=totals.get("unsmoothed_solar", totals["solar"]),
+        unsmoothed_total_kwh=totals.get("unsmoothed_total", totals["total"]),
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
         raw={
@@ -1199,6 +1349,9 @@ def _reading_from_interval_point(
             "interval_total_kwh": point["total_kwh"],
             "interval_grid_kwh": point["grid_kwh"],
             "interval_solar_kwh": point["solar_kwh"],
+            "unsmoothed_interval_total_kwh": point.get("unsmoothed_total_kwh"),
+            "unsmoothed_interval_grid_kwh": point.get("unsmoothed_grid_kwh"),
+            "unsmoothed_interval_solar_kwh": point.get("unsmoothed_solar_kwh"),
             "raw_grid_kwh": point.get("raw_grid_kwh"),
             "grid_source": "derived_total_minus_solar",
         },

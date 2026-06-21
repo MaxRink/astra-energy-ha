@@ -11,14 +11,19 @@ from homeassistant.exceptions import HomeAssistantError
 import voluptuous as vol
 
 from .const import (
+    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
+    CONF_CACHE_INTERVAL_PAYLOADS,
     CONF_CONFIG_ENTRY_ID,
     CONF_HISTORY_GRANULARITY,
     CONF_IMPORT_STATISTICS,
+    CONF_MAX_INTERVAL_AVERAGE_KW,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
     CONF_RUN_IN_BACKGROUND,
+    CONF_SMOOTH_INTERVAL_ANOMALIES,
+    CONF_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
@@ -26,7 +31,13 @@ from .const import (
     DEFAULT_RECENT_REFRESH_HOURS,
     DOMAIN,
     HISTORY_GRANULARITIES,
+    MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+    MAX_MAX_INTERVAL_AVERAGE_KW,
     MAX_RECENT_REFRESH_HOURS,
+    MAX_SMOOTHING_LOOKAROUND_DAYS,
+    MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+    MIN_MAX_INTERVAL_AVERAGE_KW,
+    MIN_SMOOTHING_LOOKAROUND_DAYS,
     SERVICE_BACKFILL_HISTORY,
 )
 from .coordinator import AstraEnergyCoordinator
@@ -42,6 +53,23 @@ _SERVICE_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_IMPORT_STATISTICS): bool,
         vol.Optional(CONF_HISTORY_GRANULARITY): vol.In(HISTORY_GRANULARITIES),
+        vol.Optional(CONF_MAX_INTERVAL_AVERAGE_KW): vol.All(
+            vol.Coerce(float),
+            vol.Range(min=MIN_MAX_INTERVAL_AVERAGE_KW, max=MAX_MAX_INTERVAL_AVERAGE_KW),
+        ),
+        vol.Optional(CONF_SMOOTH_INTERVAL_ANOMALIES): bool,
+        vol.Optional(CONF_ANOMALY_REDISTRIBUTION_WINDOW): vol.All(
+            vol.Coerce(int),
+            vol.Range(
+                min=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+                max=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+            ),
+        ),
+        vol.Optional(CONF_SMOOTHING_LOOKAROUND_DAYS): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_SMOOTHING_LOOKAROUND_DAYS, max=MAX_SMOOTHING_LOOKAROUND_DAYS),
+        ),
+        vol.Optional(CONF_CACHE_INTERVAL_PAYLOADS): bool,
         vol.Optional(CONF_CONFIG_ENTRY_ID): str,
         vol.Optional(CONF_RUN_IN_BACKGROUND, default=False): bool,
     }
@@ -91,6 +119,11 @@ async def _async_backfill_history(
             recent_refresh_hours=recent_refresh_hours,
             history_granularity=history_granularity,
             import_statistics=import_statistics,
+            max_average_kw=call.data.get(CONF_MAX_INTERVAL_AVERAGE_KW),
+            smooth_anomalies=call.data.get(CONF_SMOOTH_INTERVAL_ANOMALIES),
+            redistribution_window=call.data.get(CONF_ANOMALY_REDISTRIBUTION_WINDOW),
+            smoothing_lookaround_days=call.data.get(CONF_SMOOTHING_LOOKAROUND_DAYS),
+            cache_interval_payloads=call.data.get(CONF_CACHE_INTERVAL_PAYLOADS),
         )
     return response
 

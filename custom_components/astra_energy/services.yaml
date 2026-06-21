@@ -25,6 +25,39 @@ backfill_history:
       required: false
       selector:
         boolean:
+    max_interval_average_kw:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 1000
+          step: 0.1
+          mode: box
+          unit_of_measurement: kW
+    smooth_interval_anomalies:
+      required: false
+      selector:
+        boolean:
+    anomaly_redistribution_window:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 672
+          mode: box
+          unit_of_measurement: buckets
+    smoothing_lookaround_days:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 14
+          mode: box
+          unit_of_measurement: d
+    cache_interval_payloads:
+      required: false
+      selector:
+        boolean:
     config_entry_id:
       required: false
       selector:

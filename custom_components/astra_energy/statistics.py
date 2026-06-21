@@ -14,8 +14,18 @@ from homeassistant.util.unit_conversion import EnergyConverter
 
 from .api import AstraMeterReading
 from .const import (
+    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     HISTORY_GRANULARITY_MONTHLY,
     HISTORY_GRANULARITY_QUARTER_HOUR,
+    CONF_CACHE_INTERVAL_PAYLOADS,
+    CONF_MAX_INTERVAL_AVERAGE_KW,
+    CONF_SMOOTH_INTERVAL_ANOMALIES,
+    CONF_SMOOTHING_LOOKAROUND_DAYS,
+    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+    DEFAULT_CACHE_INTERVAL_PAYLOADS,
+    DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     ISSUE_BACKFILL_FAILED,
     SENSOR_DISPLAY_NAMES,
     SENSOR_OBJECT_IDS,
@@ -34,6 +44,18 @@ STATISTIC_CHANNELS = {
     "imported_energy": (SENSOR_STATISTIC_LABELS["imported_energy"], "grid_kwh_total"),
     "solar_energy": (SENSOR_STATISTIC_LABELS["solar_energy"], "solar_kwh_total"),
     "total_energy": (SENSOR_STATISTIC_LABELS["total_energy"], "total_kwh"),
+    "unsmoothed_imported_energy": (
+        SENSOR_STATISTIC_LABELS["unsmoothed_imported_energy"],
+        "unsmoothed_grid_kwh_total",
+    ),
+    "unsmoothed_solar_energy": (
+        SENSOR_STATISTIC_LABELS["unsmoothed_solar_energy"],
+        "unsmoothed_solar_kwh_total",
+    ),
+    "unsmoothed_total_energy": (
+        SENSOR_STATISTIC_LABELS["unsmoothed_total_energy"],
+        "unsmoothed_total_kwh",
+    ),
 }
 
 
@@ -151,6 +173,11 @@ async def async_backfill_statistics(  # pragma: no cover
     recent_refresh_hours: int,
     history_granularity: str,
     import_statistics: bool,
+    max_average_kw: float | None = None,
+    smooth_anomalies: bool | None = None,
+    redistribution_window: int | None = None,
+    smoothing_lookaround_days: int | None = None,
+    cache_interval_payloads: bool | None = None,
 ) -> dict[str, int]:
     """Fetch historical readings and optionally import long-term statistics."""
     if days <= 0 and recent_refresh_hours <= 0:
@@ -163,16 +190,52 @@ async def async_backfill_statistics(  # pragma: no cover
         start_candidates.append(end - timedelta(hours=recent_refresh_hours))
     start = min(start_candidates)
     if history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR:
-        payload_cache = await _async_interval_payload_cache(hass)
+        use_cache = (
+            coordinator.config_entry.options.get(
+                CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS
+            )
+            if cache_interval_payloads is None
+            else cache_interval_payloads
+        )
+        payload_cache = await _async_interval_payload_cache(hass) if use_cache else {}
         cache_size_before = len(payload_cache)
-        cache_before = end - timedelta(hours=recent_refresh_hours)
+        cache_before = end - timedelta(hours=recent_refresh_hours) if use_cache else None
         readings = await coordinator.client.async_get_historical_interval_meter_stands(
             start,
             end,
-            payload_cache=payload_cache,
+            payload_cache=payload_cache if use_cache else None,
             cache_before=cache_before,
+            max_average_kw=(
+                coordinator.config_entry.options.get(
+                    CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW
+                )
+                if max_average_kw is None
+                else max_average_kw
+            ),
+            smooth_anomalies=(
+                coordinator.config_entry.options.get(
+                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+                )
+                if smooth_anomalies is None
+                else smooth_anomalies
+            ),
+            redistribution_window=(
+                coordinator.config_entry.options.get(
+                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+                )
+                if redistribution_window is None
+                else redistribution_window
+            ),
+            smoothing_lookaround_days=(
+                coordinator.config_entry.options.get(
+                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+                )
+                if smoothing_lookaround_days is None
+                else smoothing_lookaround_days
+            ),
         )
-        if len(payload_cache) != cache_size_before:
+        if use_cache and len(payload_cache) != cache_size_before:
             await _async_save_interval_payload_cache(hass, payload_cache)
     else:
         history_granularity = HISTORY_GRANULARITY_MONTHLY

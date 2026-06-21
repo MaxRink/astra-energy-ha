@@ -13,6 +13,11 @@ CONF_IMPORT_STATISTICS = "import_statistics"
 CONF_GRID_PRICE_NET = "grid_price_net"
 CONF_SOLAR_PRICE_NET = "solar_price_net"
 CONF_TAX_RATE = "tax_rate"
+CONF_MAX_INTERVAL_AVERAGE_KW = "max_interval_average_kw"
+CONF_SMOOTH_INTERVAL_ANOMALIES = "smooth_interval_anomalies"
+CONF_ANOMALY_REDISTRIBUTION_WINDOW = "anomaly_redistribution_window"
+CONF_SMOOTHING_LOOKAROUND_DAYS = "smoothing_lookaround_days"
+CONF_CACHE_INTERVAL_PAYLOADS = "cache_interval_payloads"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
 CONF_RUN_IN_BACKGROUND = "run_in_background"
 
@@ -32,6 +37,11 @@ DEFAULT_IMPORT_STATISTICS = False
 DEFAULT_GRID_PRICE_NET = 0.294
 DEFAULT_SOLAR_PRICE_NET = 0.21
 DEFAULT_TAX_RATE = 0.19
+DEFAULT_MAX_INTERVAL_AVERAGE_KW = 50.0
+DEFAULT_SMOOTH_INTERVAL_ANOMALIES = True
+DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW = 96
+DEFAULT_SMOOTHING_LOOKAROUND_DAYS = 5
+DEFAULT_CACHE_INTERVAL_PAYLOADS = True
 
 MIN_POLL_INTERVAL = 60
 MAX_BACKFILL_DAYS = 3650
@@ -40,10 +50,14 @@ MIN_PRICE_NET = 0.0
 MAX_PRICE_NET = 10.0
 MIN_TAX_RATE = 0.0
 MAX_TAX_RATE = 1.0
+MIN_MAX_INTERVAL_AVERAGE_KW = 1.0
+MAX_MAX_INTERVAL_AVERAGE_KW = 1000.0
+MIN_ANOMALY_REDISTRIBUTION_WINDOW = 1
+MAX_ANOMALY_REDISTRIBUTION_WINDOW = 672
+MIN_SMOOTHING_LOOKAROUND_DAYS = 0
+MAX_SMOOTHING_LOOKAROUND_DAYS = 14
 
 DAILY_INTERVAL_CONCURRENCY = 8
-MAX_INTERVAL_AVERAGE_KW = 50.0
-ANOMALY_REDISTRIBUTION_WINDOW = 96
 
 ATTR_METER_ID = "meter_id"
 ATTR_RAW_METER_ID = "raw_meter_id"
@@ -57,6 +71,9 @@ SENSOR_DISPLAY_NAMES = {
     "solar_energy": "Astra Solar Energy",
     "total_energy": "Astra Total Energy",
     "exported_energy": "Astra Exported Energy",
+    "unsmoothed_imported_energy": "Astra Unsmoothed Grid Energy",
+    "unsmoothed_solar_energy": "Astra Unsmoothed Solar Energy",
+    "unsmoothed_total_energy": "Astra Unsmoothed Total Energy",
     "raw_grid_energy": "Astra Raw Grid Meter Energy",
     "grid_price": "Astra Grid Energy Price",
     "solar_price": "Astra Solar Energy Price",
@@ -83,6 +100,9 @@ SENSOR_OBJECT_IDS = {
     "solar_energy": "astra_solar_energy",
     "total_energy": "astra_total_energy",
     "exported_energy": "astra_exported_energy",
+    "unsmoothed_imported_energy": "astra_unsmoothed_grid_energy",
+    "unsmoothed_solar_energy": "astra_unsmoothed_solar_energy",
+    "unsmoothed_total_energy": "astra_unsmoothed_total_energy",
     "raw_grid_energy": "astra_raw_grid_meter_energy",
     "grid_price": "astra_grid_energy_price",
     "solar_price": "astra_solar_energy_price",
@@ -107,6 +127,9 @@ SENSOR_STATISTIC_LABELS = {
     "imported_energy": "grid energy",
     "solar_energy": "solar energy",
     "total_energy": "total energy",
+    "unsmoothed_imported_energy": "unsmoothed grid energy",
+    "unsmoothed_solar_energy": "unsmoothed solar energy",
+    "unsmoothed_total_energy": "unsmoothed total energy",
 }
 
 ISSUE_API_AUTH = "api_auth_failed"

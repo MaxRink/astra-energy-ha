@@ -4,6 +4,9 @@ import datetime as dt
 import importlib.util
 import sys
 import types
+import asyncio
+
+import pytest
 
 from tools.astra_mobile_probe import checksum, session_id
 from tools.analyze_capture import endpoint_key, redact_headers
@@ -117,6 +120,27 @@ def test_android_session_id() -> None:
 def test_parse_number() -> None:
     assert astra_api._parse_number("1.234,56 kWh") == 1234.56
     assert astra_api._parse_number("12,5") == 12.5
+    assert astra_api._parse_number(7) == 7.0
+    assert astra_api._parse_number(None) is None
+    assert astra_api._parse_number("") is None
+    assert astra_api._parse_number("not a number") is None
+    assert astra_api._parse_number("1-2") is None
+
+
+def test_small_parsing_helpers_cover_missing_values() -> None:
+    assert astra_api._total_or_zero(None) == 0.0
+    assert astra_api._round_or_none(1.23456, 2) == 1.23
+    assert astra_api._round_or_none(None) is None
+    assert astra_api._cost_gross(10.0, 0.5) == 5.0
+    assert astra_api._cost_gross(None, 0.5) is None
+    assert astra_api._cost_gross(10.0, None) is None
+    assert astra_api._parse_datetime(None) is None
+    assert astra_api._parse_datetime("not a date") is None
+    assert astra_api._normalize_identifier(None) is None
+    assert astra_api._normalize_identifier("   ") is None
+    assert astra_api._normalize_identifier("ZT2 052/0") == "ZT2_052_0"
+    assert astra_api._raw_meter_id_from_row({"v01": "ZT2_052/0"}) == "ZT2_052_0"
+    assert astra_api._raw_meter_id_from_row({"v01": "Strom VGB"}) is None
 
 
 def test_parse_meter_stands_from_payload() -> None:
@@ -148,6 +172,26 @@ def test_parse_meter_stands_from_payload() -> None:
     assert readings[0].grid_kwh_total == 1234.5
     assert readings[0].meter_id.startswith("derived_")
     assert readings[0].raw["interval_consumption"] == 12.3
+
+
+def test_parse_meter_skips_non_rows_and_non_energy_values() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    assert client._meter_stands_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                "bad",
+                {"v01": "No unit", "v02": "1.0", "v03": "EUR"},
+                {"v01": "No value", "v02": "", "v03": "kWh"},
+            ],
+        }
+    ) == []
 
 
 def test_parse_meter_uses_raw_meter_id_when_available() -> None:
@@ -230,6 +274,26 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
     assert readings[0].raw["channels"]["solar"]["raw_meter_id"] == "ZT2_052_0"
 
 
+def test_channel_classification_and_ungrouped_reading() -> None:
+    assert astra_api._meter_channel_kind("x", "other", "misc") == "generic"
+    reading = astra_api._reading_from_channel(
+        {
+            "raw_meter_id": None,
+            "legacy_meter_id": "legacy",
+            "total": 12.0,
+            "meter_name": "Generic",
+            "timestamp": None,
+            "unit": "kWh",
+            "interval_consumption": None,
+            "medium": "other",
+            "account": "misc",
+            "row": {},
+        }
+    )
+    assert reading.meter_id == "legacy"
+    assert reading.unsmoothed_total_kwh == 12.0
+
+
 def test_energy_balance_values_from_payload() -> None:
     values = astra_api._energy_balance_values_from_payload(
         {
@@ -256,6 +320,13 @@ def test_iter_months() -> None:
         (2026, 1),
         (2026, 2),
     ]
+    assert astra_api._iter_days(dt.date(2026, 1, 1), dt.date(2026, 1, 3)) == [
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 2),
+        dt.date(2026, 1, 3),
+    ]
+    assert astra_api._previous_month(dt.date(2026, 1, 20)) == dt.date(2025, 12, 1)
+    assert astra_api._previous_month(dt.date(2026, 6, 20)) == dt.date(2026, 5, 1)
 
 
 def test_daily_interval_values_derive_grid_from_total_minus_solar() -> None:
@@ -278,6 +349,21 @@ def test_daily_interval_values_derive_grid_from_total_minus_solar() -> None:
     assert points[0]["timestamp"] == dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC)
 
 
+def test_empty_interval_payloads_and_series_are_reported() -> None:
+    assert astra_api._daily_interval_values_and_report_from_payload(
+        {"auth": "1", "data": []},
+        dt.date(2026, 6, 19),
+    ) == ([], {"empty_payload": 1})
+    assert astra_api._daily_interval_values_and_report_from_payload(
+        {"auth": "1", "data": [{}]},
+        dt.date(2026, 6, 19),
+    ) == ([], {"empty_series": 1})
+    assert astra_api._split_csv_text("0") == []
+    assert astra_api._split_15m_series("0") == []
+    assert astra_api._series_value({}, "Gesamtbezug", 0) is None
+    assert astra_api._series_value({"gesamtbezug": [1.0]}, "Gesamtbezug", 2) is None
+
+
 def test_daily_interval_spike_is_redistributed_from_fixture() -> None:
     payload = json.loads(
         (Path(__file__).parent / "fixtures" / "astra_energy_spike_day.json").read_text()
@@ -296,6 +382,139 @@ def test_daily_interval_spike_is_redistributed_from_fixture() -> None:
     assert [round(point["grid_kwh"], 6) for point in points] == [
         round(point["total_kwh"], 6) for point in points
     ]
+    assert [point["unsmoothed_total_kwh"] for point in points] == [0.0, 0.0, 20.0, 0.0]
+
+
+def test_daily_interval_spike_can_be_rejected_as_missing_data() -> None:
+    points, report = astra_api._daily_interval_values_and_report_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "_lvb_lbl_14h": "00:15",
+                    "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                    "_lvb_vll_14h": "20.0;20.0;0.0;0.0;0.0",
+                }
+            ],
+        },
+        dt.date(2026, 6, 15),
+        max_average_kw=50.0,
+    )
+
+    assert points[0]["valid"] is False
+    assert points[0]["anomalies"] == ["total_kwh_spike"]
+    assert report["total_kwh_rejected"] == 1
+
+
+def test_daily_interval_profiled_smoothing_uses_nearby_days() -> None:
+    points = []
+    for day in (dt.date(2026, 6, 14), dt.date(2026, 6, 15), dt.date(2026, 6, 16)):
+        for minute, total in ((15, 0.0), (30, 2.0), (45, 4.0)):
+            if day == dt.date(2026, 6, 15):
+                total = 20.0 if minute == 45 else 0.0
+            points.append(
+                {
+                    "timestamp": dt.datetime.combine(
+                        day,
+                        dt.time(0, minute),
+                        tzinfo=dt.UTC,
+                    ),
+                    "total_kwh": total,
+                    "solar_kwh": 0.0,
+                    "grid_kwh": total,
+                    "unsmoothed_total_kwh": total,
+                    "unsmoothed_solar_kwh": 0.0,
+                    "unsmoothed_grid_kwh": total,
+                }
+            )
+
+    sanitized, report = astra_api._sanitize_interval_points(
+        points,
+        max_average_kw=50.0,
+        smooth_anomalies=True,
+        redistribution_window=3,
+        smoothing_lookaround_days=1,
+    )
+
+    spike_day = [point for point in sanitized if point["timestamp"].date() == dt.date(2026, 6, 15)]
+    assert report["total_kwh_redistributed"] == 1
+    assert [round(point["total_kwh"], 3) for point in spike_day] == [0.0, 6.667, 13.333]
+    assert [point["unsmoothed_total_kwh"] for point in spike_day] == [0.0, 0.0, 20.0]
+
+
+def test_profiled_smoothing_ignores_out_of_window_days() -> None:
+    timestamp = dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC)
+    weights = astra_api._redistribution_weights(
+        [
+            {"timestamp": timestamp, "total_kwh": 0.0, "solar_kwh": 0.0, "valid": True},
+            {
+                "timestamp": timestamp + dt.timedelta(days=10),
+                "total_kwh": 4.0,
+                "solar_kwh": 0.0,
+                "valid": True,
+            },
+        ],
+        [0],
+        ("solar_kwh",),
+        key="total_kwh",
+        lookaround_days=1,
+    )
+
+    assert weights == [1.0]
+
+
+def test_smoothing_falls_back_to_other_channel_then_equal_weights() -> None:
+    timestamps = [
+        dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 15, 0, 30, tzinfo=dt.UTC),
+    ]
+    other_channel = [
+        {"timestamp": timestamps[0], "total_kwh": 0.0, "solar_kwh": 1.0, "valid": True},
+        {"timestamp": timestamps[1], "total_kwh": 20.0, "solar_kwh": 3.0, "valid": True},
+    ]
+    assert astra_api._redistribution_weights(
+        other_channel,
+        [0, 1],
+        ("solar_kwh",),
+        key="total_kwh",
+        lookaround_days=0,
+    ) == [0.25, 0.75]
+
+    equal = [
+        {"timestamp": timestamps[0], "total_kwh": 0.0, "solar_kwh": 0.0, "valid": True},
+        {"timestamp": timestamps[1], "total_kwh": 20.0, "solar_kwh": 0.0, "valid": True},
+    ]
+    assert astra_api._redistribution_weights(
+        equal,
+        [0, 1],
+        ("solar_kwh",),
+        key="total_kwh",
+        lookaround_days=0,
+    ) == [0.5, 0.5]
+
+
+def test_interval_sanitizer_rejects_negative_values() -> None:
+    sanitized, report = astra_api._sanitize_interval_points(
+        [
+            {
+                "timestamp": dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC),
+                "total_kwh": -1.0,
+                "solar_kwh": 0.0,
+                "grid_kwh": -1.0,
+            },
+            {
+                "timestamp": dt.datetime(2026, 6, 15, 0, 30, tzinfo=dt.UTC),
+                "total_kwh": 10.0,
+                "solar_kwh": 0.0,
+                "grid_kwh": 10.0,
+            },
+        ],
+        max_average_kw=20.0,
+    )
+
+    assert sanitized[0]["valid"] is False
+    assert sanitized[1]["valid"] is True
+    assert report["total_kwh_negative_rejected"] == 1
 
 
 def test_daily_interval_clamps_solar_to_total() -> None:
@@ -340,6 +559,21 @@ def test_overview_metrics_derive_grid_and_keep_raw_grid() -> None:
     assert metrics["autarky_percent"] == 11.759
 
 
+def test_overview_metrics_fall_back_to_raw_grid() -> None:
+    metrics = astra_api._overview_metrics_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                "bad",
+                {"v01": "str_mtr_vbo_vb_strom_t1", "v02": "1605.326", "v03": "kWh"},
+                {"v01": "ignored", "v02": "", "v03": "kWh"},
+            ],
+        }
+    )
+
+    assert metrics["current_year_grid_kwh"] == 1605.326
+
+
 def test_monthly_metrics_derive_grid_from_total_minus_solar() -> None:
     metrics = astra_api._monthly_metrics_from_payload(
         {
@@ -364,6 +598,45 @@ def test_monthly_metrics_derive_grid_from_total_minus_solar() -> None:
     assert metrics["current_month_raw_grid_kwh"] == 402.801
     assert metrics["current_month_solar_kwh"] == 20.79
     assert metrics["current_month_grid_kwh"] == 402.801
+
+
+def test_monthly_metrics_empty_and_pv_fallback() -> None:
+    assert astra_api._monthly_metrics_from_payload({"data": []}, 0) == {}
+    assert astra_api._monthly_metrics_from_payload({"data": [{}]}, 0) == {}
+    assert astra_api._monthly_metrics_from_payload(
+        {
+            "data": [
+                {
+                    "_vb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug",
+                    "_vb_vll": "10.0;9.0;0.0;1.0",
+                }
+            ],
+        },
+        0,
+    )["current_month_solar_kwh"] == 1.0
+    raw_only = astra_api._monthly_metrics_from_payload(
+        {
+            "data": [
+                {
+                    "_vb_ttl": "Netzbezug",
+                    "_vb_vll": "9.0",
+                }
+            ],
+        },
+        0,
+    )
+    assert raw_only["current_month_grid_kwh"] == 9.0
+    assert astra_api._monthly_metrics_from_payload(
+        {
+            "data": [
+                {
+                    "_vb_ttl": "Gesamtbezug",
+                    "_vb_vll": "9.0",
+                }
+            ],
+        },
+        1,
+    ) == {}
 
 
 def test_interval_point_reading_uses_cumulative_totals() -> None:
@@ -392,8 +665,67 @@ def test_interval_point_reading_uses_cumulative_totals() -> None:
     assert reading.grid_kwh_total == 87.0
     assert reading.solar_kwh_total == 23.0
     assert reading.total_kwh == 110.0
+    assert reading.unsmoothed_grid_kwh_total == 87.0
     assert reading.power_w == 40000.0
     assert reading.raw["grid_source"] == "derived_total_minus_solar"
+
+
+def test_reading_with_metrics_adds_prices_costs_and_raw_payload() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        grid_price_net=0.294,
+        solar_price_net=0.21,
+        tax_rate=0.19,
+    )
+    reading = client._reading_with_metrics(
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=None,
+            power_w=None,
+            imported_kwh_total=100.0,
+            raw={},
+        ),
+        overview_values={"current_year_grid_kwh": 10.0, "current_year_solar_kwh": 2.0},
+        monthly_values={"current_month_grid_kwh": 1.0, "current_month_solar_kwh": 0.5},
+    )
+
+    assert reading.grid_price_gross_eur_per_kwh == 0.34986
+    assert reading.solar_price_gross_eur_per_kwh == 0.2499
+    assert reading.current_month_total_cost_gross_eur == 0.4749
+    assert reading.current_year_total_cost_gross_eur == 3.9984
+    assert reading.raw["tariff"]["tax_rate"] == 0.19
+
+
+def test_latest_reading_by_month_uses_latest_timestamp() -> None:
+    older = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=1.0,
+    )
+    newer = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 6, 2, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=2.0,
+    )
+    missing = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=3.0,
+    )
+
+    assert astra_api._latest_reading_by_month([older, missing, newer]) == {
+        dt.date(2026, 6, 1): newer
+    }
 
 
 def test_statistics_rows_align_interval_end_timestamps_to_hour() -> None:
@@ -499,6 +831,77 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
     assert [row["sum"] for row in rows] == [0.0, 0.0, 25.0]
 
 
+def test_statistics_rows_skip_missing_timestamp_or_value() -> None:
+    assert (
+        statistics._statistics_rows(
+            [
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=None,
+                    power_w=None,
+                    imported_kwh_total=None,
+                    grid_kwh_total=100.0,
+                )
+            ],
+            "grid_kwh_total",
+        )
+        == []
+    )
+    assert (
+        statistics._statistics_rows(
+            [
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=None,
+                    grid_kwh_total=None,
+                )
+            ],
+            "grid_kwh_total",
+        )
+        == []
+    )
+
+
+def test_statistics_rows_skip_missing_timestamp_or_value_mixed_input() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 1, 0),
+                power_w=None,
+                imported_kwh_total=None,
+                grid_kwh_total=100.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 2, 0),
+                power_w=None,
+                imported_kwh_total=None,
+                grid_kwh_total=None,
+            ),
+        ],
+        "grid_kwh_total",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["state"] == 100.0
+
+
+def test_interval_hour_start_handles_exact_hour() -> None:
+    assert astra_api._interval_hour_start(dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC)) == (
+        dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC)
+    )
+    assert astra_api._interval_hour_start(dt.datetime(2026, 6, 19, 1, 15, tzinfo=dt.UTC)) == (
+        dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC)
+    )
+
+
 def test_statistics_ids_match_suggested_entity_ids() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="1EBZ0103002978_0",
@@ -513,6 +916,119 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
     assert statistics._sensor_statistic_id(reading, "solar_energy") == ("sensor.astra_solar_energy")
     assert statistics._sensor_statistic_id(reading, "total_energy") == ("sensor.astra_total_energy")
+    assert statistics._sensor_statistic_id(reading, "unsmoothed_imported_energy") == (
+        "sensor.astra_unsmoothed_grid_energy"
+    )
+    assert statistics._sensor_statistic_id(reading, "unsmoothed_solar_energy") == (
+        "sensor.astra_unsmoothed_solar_energy"
+    )
+    assert statistics._sensor_statistic_id(reading, "unsmoothed_total_energy") == (
+        "sensor.astra_unsmoothed_total_energy"
+    )
+
+
+class FakeResponse:
+    def __init__(self, text: str, status: int = 200) -> None:
+        self._text = text
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb):
+        return False
+
+    async def text(self) -> str:
+        return self._text
+
+
+class FakeSession:
+    def __init__(self, response: FakeResponse | None = None, error: Exception | None = None) -> None:
+        self.response = response
+        self.error = error
+
+    def post(self, *_args, **_kwargs):
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+def _verified_response(body: str, status: int = 200) -> FakeResponse:
+    return FakeResponse(body + astra_api._md5(body), status=status)
+
+
+def test_post_raw_wraps_unreachable_api() -> None:
+    client = astra_api.AstraClient(
+        FakeSession(error=OSError("network down")),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(astra_api.AstraApiError, match="network down"):
+        asyncio.run(client._post_raw({"s_action": "get_ts"}))
+
+
+def test_post_raw_reports_http_errors() -> None:
+    client = astra_api.AstraClient(
+        FakeSession(response=_verified_response("nope", status=500)),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(astra_api.AstraApiError, match="Astra HTTP 500"):
+        asyncio.run(client._post_raw({"s_action": "get_ts"}))
+
+
+def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
+    short_client = astra_api.AstraClient(
+        FakeSession(response=FakeResponse("short")),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraProtocolError, match="too short"):
+        asyncio.run(short_client._post_raw({"s_action": "get_ts"}))
+
+    checksum_client = astra_api.AstraClient(
+        FakeSession(response=FakeResponse("body" + "0" * 32)),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraProtocolError, match="checksum"):
+        asyncio.run(checksum_client._post_raw({"s_action": "get_ts"}))
+
+
+def test_login_reports_protocol_and_auth_errors() -> None:
+    protocol_client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    async def bad_json(*_args, **_kwargs):
+        return "not-json"
+
+    protocol_client._post_action = bad_json
+    with pytest.raises(astra_api.AstraProtocolError, match="not JSON"):
+        asyncio.run(protocol_client.async_login())
+
+    auth_client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    async def auth_failed(*_args, **_kwargs):
+        return json.dumps({"auth": "0"})
+
+    auth_client._post_action = auth_failed
+    with pytest.raises(astra_api.AstraAuthError, match="authentication failed"):
+        asyncio.run(auth_client.async_login())
 
 
 def test_reporting_error_payload() -> None:

@@ -12,10 +12,18 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import AstraApiError, AstraAuthError, AstraClient, AstraMeterReading
 from .const import (
+    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     CONF_GRID_PRICE_NET,
+    CONF_MAX_INTERVAL_AVERAGE_KW,
+    CONF_SMOOTH_INTERVAL_ANOMALIES,
+    CONF_SMOOTHING_LOOKAROUND_DAYS,
     CONF_SOLAR_PRICE_NET,
     CONF_TAX_RATE,
+    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_GRID_PRICE_NET,
+    DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
     DOMAIN,
@@ -47,6 +55,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             config_entry=entry,
             update_interval=update_interval,
         )
+        self.config_entry = entry
         self.client = AstraClient(
             async_get_clientsession(hass),
             username=username,
@@ -55,6 +64,19 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             grid_price_net=entry.options.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
             solar_price_net=entry.options.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
             tax_rate=entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
+            max_interval_average_kw=entry.options.get(
+                CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW
+            ),
+            smooth_interval_anomalies=entry.options.get(
+                CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+            ),
+            anomaly_redistribution_window=entry.options.get(
+                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+            ),
+            smoothing_lookaround_days=entry.options.get(
+                CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+            ),
         )
         self.last_error: dict[str, str] | None = None
 

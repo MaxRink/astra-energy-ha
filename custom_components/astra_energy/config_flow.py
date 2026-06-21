@@ -13,32 +13,48 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import AstraApiError, AstraAuthError, AstraClient
 from .const import (
+    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
+    CONF_CACHE_INTERVAL_PAYLOADS,
     CONF_GRID_PRICE_NET,
     CONF_HISTORY_GRANULARITY,
     CONF_IMPORT_STATISTICS,
+    CONF_MAX_INTERVAL_AVERAGE_KW,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
+    CONF_SMOOTH_INTERVAL_ANOMALIES,
+    CONF_SMOOTHING_LOOKAROUND_DAYS,
     CONF_SOLAR_PRICE_NET,
     CONF_TAX_RATE,
+    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
+    DEFAULT_CACHE_INTERVAL_PAYLOADS,
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
+    DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_REFRESH_HOURS,
+    DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
+    DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
     DOMAIN,
     HISTORY_GRANULARITIES,
     MAX_BACKFILL_DAYS,
+    MAX_MAX_INTERVAL_AVERAGE_KW,
+    MAX_ANOMALY_REDISTRIBUTION_WINDOW,
     MAX_PRICE_NET,
     MAX_RECENT_REFRESH_HOURS,
+    MAX_SMOOTHING_LOOKAROUND_DAYS,
     MAX_TAX_RATE,
+    MIN_MAX_INTERVAL_AVERAGE_KW,
+    MIN_ANOMALY_REDISTRIBUTION_WINDOW,
     MIN_PRICE_NET,
     MIN_POLL_INTERVAL,
+    MIN_SMOOTHING_LOOKAROUND_DAYS,
     MIN_TAX_RATE,
 )
 
@@ -110,8 +126,66 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_TAX_RATE,
                 default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
             ): vol.All(vol.Coerce(float), vol.Range(min=MIN_TAX_RATE, max=MAX_TAX_RATE)),
+            vol.Required(
+                CONF_MAX_INTERVAL_AVERAGE_KW,
+                default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
+            ): vol.All(
+                vol.Coerce(float),
+                vol.Range(min=MIN_MAX_INTERVAL_AVERAGE_KW, max=MAX_MAX_INTERVAL_AVERAGE_KW),
+            ),
+            vol.Required(
+                CONF_SMOOTH_INTERVAL_ANOMALIES,
+                default=defaults.get(
+                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+                ),
+            ): bool,
+            vol.Required(
+                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                default=defaults.get(
+                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(
+                    min=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+                    max=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+                ),
+            ),
+            vol.Required(
+                CONF_SMOOTHING_LOOKAROUND_DAYS,
+                default=defaults.get(
+                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=MIN_SMOOTHING_LOOKAROUND_DAYS, max=MAX_SMOOTHING_LOOKAROUND_DAYS),
+            ),
+            vol.Required(
+                CONF_CACHE_INTERVAL_PAYLOADS,
+                default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
+            ): bool,
         }
     )
+
+
+def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Return config entry options controlled by the UI."""
+    return {
+        CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
+        CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
+        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
+        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
+        CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
+        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
+        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
+        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
+        CONF_MAX_INTERVAL_AVERAGE_KW: user_input[CONF_MAX_INTERVAL_AVERAGE_KW],
+        CONF_SMOOTH_INTERVAL_ANOMALIES: user_input[CONF_SMOOTH_INTERVAL_ANOMALIES],
+        CONF_ANOMALY_REDISTRIBUTION_WINDOW: user_input[CONF_ANOMALY_REDISTRIBUTION_WINDOW],
+        CONF_SMOOTHING_LOOKAROUND_DAYS: user_input[CONF_SMOOTHING_LOOKAROUND_DAYS],
+        CONF_CACHE_INTERVAL_PAYLOADS: user_input[CONF_CACHE_INTERVAL_PAYLOADS],
+    }
 
 
 class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -145,16 +219,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
                         CONF_BASE_URL: user_input[CONF_BASE_URL],
                     },
-                    options={
-                        CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
-                        CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
-                        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
-                        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
-                        CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
-                        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
-                        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
-                        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
-                    },
+                    options=_options_from_input(user_input),
                 )
 
         return self.async_show_form(
@@ -227,16 +292,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates=merged,
-                    options={
-                        CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
-                        CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
-                        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
-                        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
-                        CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
-                        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
-                        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
-                        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
-                    },
+                    options=_options_from_input(user_input),
                 )
         return self.async_show_form(
             step_id="reconfigure",
@@ -267,55 +323,5 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_POLL_INTERVAL,
-                        default=self._config_entry.options.get(
-                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL)),
-                    vol.Required(
-                        CONF_BACKFILL_DAYS,
-                        default=self._config_entry.options.get(
-                            CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_BACKFILL_DAYS)),
-                    vol.Required(
-                        CONF_RECENT_REFRESH_HOURS,
-                        default=self._config_entry.options.get(
-                            CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
-                    vol.Required(
-                        CONF_HISTORY_GRANULARITY,
-                        default=self._config_entry.options.get(
-                            CONF_HISTORY_GRANULARITY,
-                            DEFAULT_HISTORY_GRANULARITY,
-                        ),
-                    ): vol.In(HISTORY_GRANULARITIES),
-                    vol.Required(
-                        CONF_IMPORT_STATISTICS,
-                        default=self._config_entry.options.get(
-                            CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS
-                        ),
-                    ): bool,
-                    vol.Required(
-                        CONF_GRID_PRICE_NET,
-                        default=self._config_entry.options.get(
-                            CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET
-                        ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
-                    vol.Required(
-                        CONF_SOLAR_PRICE_NET,
-                        default=self._config_entry.options.get(
-                            CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET
-                        ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
-                    vol.Required(
-                        CONF_TAX_RATE,
-                        default=self._config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_TAX_RATE, max=MAX_TAX_RATE)),
-                }
-            ),
+            data_schema=_data_schema(dict(self._config_entry.options)),
         )

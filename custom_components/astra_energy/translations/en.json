@@ -23,7 +23,12 @@
           "import_statistics": "Import historical long-term statistics",
           "grid_price_net": "Grid price before tax in EUR/kWh",
           "solar_price_net": "Solar price before tax in EUR/kWh",
-          "tax_rate": "Tax rate"
+          "tax_rate": "Tax rate",
+          "max_interval_average_kw": "Maximum plausible interval average in kW",
+          "smooth_interval_anomalies": "Smooth delayed interval anomalies",
+          "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
+          "smoothing_lookaround_days": "Smoothing lookaround days",
+          "cache_interval_payloads": "Cache old interval API payloads"
         },
         "data_description": {
           "username": "Astra Cockpit username.",
@@ -36,7 +41,12 @@
           "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics.",
           "grid_price_net": "Astra reports prices before German VAT. The price entity exposes the gross value.",
           "solar_price_net": "Astra reports prices before German VAT. The price entity exposes the gross value.",
-          "tax_rate": "Tax rate as a decimal fraction, for example 0.19 for 19%."
+          "tax_rate": "Tax rate as a decimal fraction, for example 0.19 for 19%.",
+          "max_interval_average_kw": "Reject or smooth quarter-hour values above this average power. The default 50 kW is intentionally high for a residence.",
+          "smooth_interval_anomalies": "Redistribute delayed provider spikes across preceding missing buckets instead of leaving them out as missing data.",
+          "anomaly_redistribution_window": "Maximum number of preceding 15-minute buckets that one delayed spike may be spread over.",
+          "smoothing_lookaround_days": "Use matching time-of-day values from nearby days to shape smoothing. Set to 0 to only use same-day channel shape.",
+          "cache_interval_payloads": "Do not re-download older daily interval payloads after they were fetched once. Recent hours are still refreshed."
         }
       },
       "reauth_confirm": {
@@ -61,7 +71,12 @@
           "import_statistics": "Import historical long-term statistics",
           "grid_price_net": "Grid price before tax in EUR/kWh",
           "solar_price_net": "Solar price before tax in EUR/kWh",
-          "tax_rate": "Tax rate"
+          "tax_rate": "Tax rate",
+          "max_interval_average_kw": "Maximum plausible interval average in kW",
+          "smooth_interval_anomalies": "Smooth delayed interval anomalies",
+          "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
+          "smoothing_lookaround_days": "Smoothing lookaround days",
+          "cache_interval_payloads": "Cache old interval API payloads"
         }
       }
     }
@@ -78,7 +93,12 @@
           "import_statistics": "Import historical long-term statistics",
           "grid_price_net": "Grid price before tax in EUR/kWh",
           "solar_price_net": "Solar price before tax in EUR/kWh",
-          "tax_rate": "Tax rate"
+          "tax_rate": "Tax rate",
+          "max_interval_average_kw": "Maximum plausible interval average in kW",
+          "smooth_interval_anomalies": "Smooth delayed interval anomalies",
+          "anomaly_redistribution_window": "Maximum smoothing window in 15-minute buckets",
+          "smoothing_lookaround_days": "Smoothing lookaround days",
+          "cache_interval_payloads": "Cache old interval API payloads"
         }
       }
     }
@@ -103,6 +123,26 @@
         "import_statistics": {
           "name": "Import statistics",
           "description": "Write fetched historical readings to recorder long-term statistics."
+        },
+        "max_interval_average_kw": {
+          "name": "Maximum plausible interval average in kW",
+          "description": "Override the configured anomaly threshold for this backfill run."
+        },
+        "smooth_interval_anomalies": {
+          "name": "Smooth delayed interval anomalies",
+          "description": "Override whether this backfill redistributes delayed spikes or leaves affected hours as missing data."
+        },
+        "anomaly_redistribution_window": {
+          "name": "Maximum smoothing window in 15-minute buckets",
+          "description": "Override how far back one delayed spike may be spread for this backfill run."
+        },
+        "smoothing_lookaround_days": {
+          "name": "Smoothing lookaround days",
+          "description": "Override how many nearby days are used for time-of-day smoothing weights."
+        },
+        "cache_interval_payloads": {
+          "name": "Cache old interval API payloads",
+          "description": "Override whether older daily interval payloads are reused from the cache for this backfill run."
         },
         "config_entry_id": {
           "name": "Config entry ID",
@@ -142,6 +182,15 @@
       },
       "total_energy": {
         "name": "Total energy"
+      },
+      "unsmoothed_imported_energy": {
+        "name": "Unsmoothed grid energy"
+      },
+      "unsmoothed_solar_energy": {
+        "name": "Unsmoothed solar energy"
+      },
+      "unsmoothed_total_energy": {
+        "name": "Unsmoothed total energy"
       },
       "exported_energy": {
         "name": "Exported energy"
