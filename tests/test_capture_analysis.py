@@ -1146,15 +1146,6 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
     assert statistics._sensor_statistic_id(reading, "solar_energy") == ("sensor.astra_solar_energy")
     assert statistics._sensor_statistic_id(reading, "total_energy") == ("sensor.astra_total_energy")
-    assert statistics._sensor_statistic_id(reading, "unsmoothed_imported_energy") == (
-        "sensor.astra_unsmoothed_grid_energy"
-    )
-    assert statistics._sensor_statistic_id(reading, "unsmoothed_solar_energy") == (
-        "sensor.astra_unsmoothed_solar_energy"
-    )
-    assert statistics._sensor_statistic_id(reading, "unsmoothed_total_energy") == (
-        "sensor.astra_unsmoothed_total_energy"
-    )
     assert statistics._sensor_statistic_id(reading, "grid_energy_cost_total") == (
         "sensor.astra_grid_energy_cost_total"
     )
@@ -1164,6 +1155,12 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     assert statistics._sensor_statistic_id(reading, "total_energy_cost_total") == (
         "sensor.astra_total_energy_cost_total"
     )
+
+
+def test_unsmoothed_diagnostic_sensors_are_not_imported_to_recorder_statistics() -> None:
+    assert "unsmoothed_imported_energy" not in statistics.STATISTIC_CHANNELS
+    assert "unsmoothed_solar_energy" not in statistics.STATISTIC_CHANNELS
+    assert "unsmoothed_total_energy" not in statistics.STATISTIC_CHANNELS
 
 
 class FakeResponse:

@@ -43,21 +43,6 @@ STATISTIC_CHANNELS = {
     "imported_energy": ("grid_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
     "solar_energy": ("solar_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
     "total_energy": ("total_kwh", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
-    "unsmoothed_imported_energy": (
-        "unsmoothed_grid_kwh_total",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-    ),
-    "unsmoothed_solar_energy": (
-        "unsmoothed_solar_kwh_total",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-    ),
-    "unsmoothed_total_energy": (
-        "unsmoothed_total_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-    ),
     "grid_energy_cost_total": ("grid_cost_total_gross_eur", None, "EUR"),
     "solar_energy_cost_total": ("solar_cost_total_gross_eur", None, "EUR"),
     "total_energy_cost_total": ("total_cost_total_gross_eur", None, "EUR"),
@@ -150,7 +135,7 @@ async def _async_statistic_starts(
     start: datetime,
 ) -> dict[str, dict[str, float]]:  # pragma: no cover
     """Return recorder sum and state immediately before the imported window."""
-    query_start = start - timedelta(days=7)
+    query_start = start - timedelta(days=3650)
 
     def read_starts() -> dict[str, dict[str, float]]:
         try:

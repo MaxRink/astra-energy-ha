@@ -168,7 +168,9 @@ recorder statistics. Recorder imports also skip cumulative rollbacks and
 implausible hourly jumps so a bad provider value cannot create negative
 hundreds-of-kWh Energy Dashboard deltas. Delayed/bunched values are
 redistributed over preceding flat intervals when possible, and impossible
-residential-scale spikes are rejected. Enable debug logging for
+residential-scale spikes are rejected. The unsmoothed diagnostic sensors remain
+available as live entities only and are deliberately not imported into recorder
+statistics, because they preserve raw provider anomalies for inspection. Enable debug logging for
 `custom_components.astra_energy` to see API action timing, fetched-vs-cached day
 counts, and anomaly repair counters.
 

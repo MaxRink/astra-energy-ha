@@ -1,0 +1,47 @@
+{
+  "sensor.astra_unsmoothed_solar_energy": {
+    "rows": 11045,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_total_energy_cost_total": {
+    "rows": 197,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_solar_energy_cost_total": {
+    "rows": 197,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_solar_energy": {
+    "rows": 11047,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_unsmoothed_total_energy": {
+    "rows": 11045,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_unsmoothed_grid_energy": {
+    "rows": 11045,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_total_energy": {
+    "rows": 11047,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_grid_energy": {
+    "rows": 11047,
+    "anomaly_count": 0,
+    "anomalies": []
+  },
+  "sensor.astra_grid_energy_cost_total": {
+    "rows": 197,
+    "anomaly_count": 0,
+    "anomalies": []
+  }
+}

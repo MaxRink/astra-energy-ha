@@ -1,0 +1,114 @@
+[
+  {
+    "sid": "sensor.astra_unsmoothed_solar_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 1135.3318979411608,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_total_energy_cost_total",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 45.376599999999826,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_solar_energy_cost_total",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 14.06189999999998,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_solar_energy",
+    "start": "2025-03-18T10:00:00+00:00",
+    "amount": 748.839,
+    "reason": "initial_negative_sum",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_solar_energy",
+    "start": "2025-06-10T23:00:00+00:00",
+    "amount": 1.847619481956599,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_solar_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 358.40070458576787,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_unsmoothed_total_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 5339.719999999998,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_unsmoothed_grid_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 4207.654313554963,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_total_energy",
+    "start": "2025-03-18T10:00:00+00:00",
+    "amount": 5334.815,
+    "reason": "initial_negative_sum",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_total_energy",
+    "start": "2025-06-10T23:00:00+00:00",
+    "amount": 7.035000000015316,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_total_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 4.769999999994525,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_grid_energy",
+    "start": "2025-03-18T10:00:00+00:00",
+    "amount": 4208.892669586761,
+    "reason": "initial_negative_sum",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_grid_energy",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 23.452625827497286,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  },
+  {
+    "sid": "sensor.astra_grid_energy_cost_total",
+    "start": "2026-06-21T14:00:00+00:00",
+    "amount": 31.314699999999903,
+    "reason": "negative_sum_delta",
+    "success": true,
+    "error": null
+  }
+]

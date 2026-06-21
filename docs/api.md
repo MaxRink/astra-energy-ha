@@ -506,6 +506,9 @@ Widget RPC methods observed:
   cumulative rollbacks, and implausible hourly jumps before writing long-term
   statistics. Rejected rows become missing data rather than negative
   hundreds-of-kWh Energy Dashboard deltas.
+- The unsmoothed Astra sensors are diagnostic-only live entities. They are not
+  imported into recorder statistics and should not be selected as Energy
+  Dashboard sources, because they intentionally retain raw provider anomalies.
 - Confirmed pricing data is currently limited to invoice totals from
   `get_mtr_inv`. Per-kWh grid/PV tariffs should only become Home Assistant price
   entities once an endpoint returns actual tariff values. When confirmed, expose
