@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
@@ -44,6 +45,8 @@ from .coordinator import AstraEnergyCoordinator
 from .statistics import async_backfill_statistics
 
 AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
+
+_LOGGER = logging.getLogger(__name__)
 
 _SERVICE_SCHEMA = vol.Schema(
     {
@@ -133,6 +136,14 @@ async def _async_background_backfill(hass: HomeAssistant, call: ServiceCall) -> 
     await _async_backfill_history(hass, call)
 
 
+async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator) -> None:
+    """Run the initial provider update without blocking config-entry setup."""
+    try:
+        await coordinator.async_refresh()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Astra Energy initial refresh failed")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) -> bool:
     """Set up Astra Energy from a config entry."""
     coordinator = AstraEnergyCoordinator(
@@ -145,11 +156,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
             seconds=entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         ),
     )
-    await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    coordinator.data = coordinator.data or {}
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    initial_refresh_task = hass.async_create_task(_async_background_initial_refresh(coordinator))
+    entry.async_on_unload(initial_refresh_task.cancel)
 
     if not hass.services.has_service(DOMAIN, SERVICE_BACKFILL_HISTORY):
 

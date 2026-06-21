@@ -1398,8 +1398,10 @@ class FakeSession:
     def __init__(self, response: FakeResponse | None = None, error: Exception | None = None) -> None:
         self.response = response
         self.error = error
+        self.calls: list[tuple[tuple, dict]] = []
 
     def post(self, *_args, **_kwargs):
+        self.calls.append((_args, _kwargs))
         if self.error is not None:
             raise self.error
         return self.response
@@ -1454,6 +1456,19 @@ def test_post_raw_reports_http_errors() -> None:
 
     with pytest.raises(astra_api.AstraApiError, match="Astra HTTP 500"):
         asyncio.run(client._post_raw({"s_action": "get_ts"}))
+
+
+def test_post_raw_uses_bounded_request_timeout() -> None:
+    session = FakeSession(response=_verified_response("ok"))
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    assert asyncio.run(client._post_raw({"s_action": "get_ts"})) == "ok"
+    assert session.calls[0][1]["timeout"] == astra_api.DEFAULT_REQUEST_TIMEOUT
 
 
 def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:

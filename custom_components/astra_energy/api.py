@@ -19,6 +19,7 @@ from .const import (
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
@@ -847,6 +848,7 @@ class AstraClient:
         self._smooth_interval_anomalies = bool(smooth_interval_anomalies)
         self._anomaly_redistribution_window = int(anomaly_redistribution_window)
         self._smoothing_lookaround_days = int(smoothing_lookaround_days)
+        self._request_timeout = DEFAULT_REQUEST_TIMEOUT
 
     async def _post_action(self, action: str, **params: str) -> str:  # pragma: no cover
         """POST one Android API action and verify Astra's MD5 response suffix."""
@@ -889,6 +891,7 @@ class AstraClient:
                 url,
                 data=payload,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=self._request_timeout,
             ) as response:
                 text = await response.text()
                 if response.status >= 400:
