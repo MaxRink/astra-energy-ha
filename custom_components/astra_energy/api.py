@@ -516,6 +516,68 @@ def _redistribute_interval_spikes(
         )
 
 
+def _redistribute_delayed_interval_runs(
+    points: list[dict[str, Any]],
+    key: str,
+    *,
+    max_interval_kwh: float,
+    smooth_anomalies: bool,
+    redistribution_window: int,
+    smoothing_lookaround_days: int,
+    report: dict[str, int],
+) -> None:
+    """Redistribute a catch-up run after a long flat interval gap."""
+    if not smooth_anomalies:
+        return
+    weight_keys = ("solar_kwh",) if key == "total_kwh" else ("total_kwh",)
+    delayed_catchup_min_kwh = max(1.0, max_interval_kwh / 4.0)
+    index = 1
+    while index < len(points):
+        value = float(points[index].get(key) or 0.0)
+        previous = float(points[index - 1].get(key) or 0.0)
+        if value <= 0.001 or previous > 0.001:
+            index += 1
+            continue
+        start = index
+        while start > 0 and index - start < redistribution_window:
+            earlier = float(points[start - 1].get(key) or 0.0)
+            if earlier > 0.001:
+                break
+            start -= 1
+        flat_count = index - start
+        if flat_count < 8:
+            index += 1
+            continue
+        run_end = index
+        while (
+            run_end + 1 < len(points)
+            and run_end - index < 3
+            and float(points[run_end + 1].get(key) or 0.0) > 0.001
+        ):
+            run_end += 1
+        total = sum(float(points[target].get(key) or 0.0) for target in range(index, run_end + 1))
+        if total <= delayed_catchup_min_kwh:
+            index = run_end + 1
+            continue
+        indexes = list(range(start, run_end + 1))
+        weights = _redistribution_weights(
+            points,
+            indexes,
+            weight_keys,
+            key=key,
+            lookaround_days=smoothing_lookaround_days,
+        )
+        for target_index, weight in zip(indexes, weights, strict=False):
+            points[target_index][key] = total * weight
+        report[f"{key}_delayed_run_redistributed"] = (
+            report.get(f"{key}_delayed_run_redistributed", 0) + 1
+        )
+        report[f"{key}_redistributed_buckets"] = (
+            report.get(f"{key}_redistributed_buckets", 0) + len(indexes)
+        )
+        index = run_end + 1
+
+
 def _sanitize_interval_points(
     points: list[dict[str, Any]],
     *,
@@ -541,6 +603,15 @@ def _sanitize_interval_points(
                 )
     for key in ("total_kwh", "solar_kwh"):
         _redistribute_interval_spikes(
+            sanitized,
+            key,
+            max_interval_kwh=max_interval_kwh,
+            smooth_anomalies=smooth_anomalies,
+            redistribution_window=redistribution_window,
+            smoothing_lookaround_days=smoothing_lookaround_days,
+            report=report,
+        )
+        _redistribute_delayed_interval_runs(
             sanitized,
             key,
             max_interval_kwh=max_interval_kwh,

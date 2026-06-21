@@ -531,6 +531,59 @@ def test_interval_catchup_can_redistribute_across_midnight() -> None:
     assert [point["total_kwh"] for point in sanitized] == [3.0, 3.0, 3.0]
 
 
+def test_delayed_interval_run_after_long_gap_is_redistributed() -> None:
+    start = dt.datetime(2026, 6, 15, 12, 15, tzinfo=dt.UTC)
+    raw_points = []
+    for index in range(12):
+        raw_points.append(
+            {
+                "timestamp": start + dt.timedelta(minutes=15 * index),
+                "total_kwh": 0.0 if index < 8 else 2.0,
+                "solar_kwh": 0.0,
+                "grid_kwh": 0.0 if index < 8 else 2.0,
+                "unsmoothed_total_kwh": 0.0 if index < 8 else 2.0,
+                "unsmoothed_solar_kwh": 0.0,
+                "unsmoothed_grid_kwh": 0.0 if index < 8 else 2.0,
+            }
+        )
+
+    sanitized, report = astra_api._sanitize_interval_points(raw_points, max_average_kw=50.0)
+
+    assert report["total_kwh_delayed_run_redistributed"] == 1
+    assert round(sum(point["total_kwh"] for point in sanitized), 6) == 8.0
+    assert max(point["total_kwh"] for point in sanitized) < 1.0
+    assert [point["unsmoothed_total_kwh"] for point in sanitized[-4:]] == [2.0, 2.0, 2.0, 2.0]
+
+
+def test_delayed_interval_run_respects_smoothing_toggle_and_minimum() -> None:
+    start = dt.datetime(2026, 6, 15, 12, 15, tzinfo=dt.UTC)
+    raw_points = [
+        {
+            "timestamp": start + dt.timedelta(minutes=15 * index),
+            "total_kwh": 0.0 if index < 8 else 0.2,
+            "solar_kwh": 0.0,
+            "grid_kwh": 0.0 if index < 8 else 0.2,
+        }
+        for index in range(9)
+    ]
+
+    disabled, disabled_report = astra_api._sanitize_interval_points(
+        [{**point} for point in raw_points],
+        max_average_kw=50.0,
+        smooth_anomalies=False,
+    )
+    below_minimum, below_minimum_report = astra_api._sanitize_interval_points(
+        [{**point} for point in raw_points],
+        max_average_kw=50.0,
+        smooth_anomalies=True,
+    )
+
+    assert "total_kwh_delayed_run_redistributed" not in disabled_report
+    assert "total_kwh_delayed_run_redistributed" not in below_minimum_report
+    assert disabled[-1]["total_kwh"] == 0.2
+    assert below_minimum[-1]["total_kwh"] == 0.2
+
+
 def test_profiled_smoothing_ignores_out_of_window_days() -> None:
     timestamp = dt.datetime(2026, 6, 15, 0, 15, tzinfo=dt.UTC)
     weights = astra_api._redistribution_weights(
