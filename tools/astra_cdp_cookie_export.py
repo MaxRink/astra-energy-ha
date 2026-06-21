@@ -71,7 +71,7 @@ def main() -> int:
     cdp.command("Runtime.enable")
     location = _location_href(cdp) or page.get("url") or ""
     cookies = _domain_cookies(cdp.command("Network.getAllCookies"), args.domain)
-    session_id = _extract_session_id(location) or _session_id_from_tabs(tabs)
+    session_id = _extract_session_id(location) or _session_id_from_tabs(tabs) or _session_id_from_dom(cdp)
     cookie_header = "; ".join(f"{item['name']}={item['value']}" for item in cookies)
 
     summary = {
@@ -87,19 +87,19 @@ def main() -> int:
         print(f"ASTRA_WEB_SESSION_ID={session_id or ''}")
         print(f"ASTRA_WEB_COOKIE={cookie_header}")
 
-    if args.write_env:
-        _update_env(
-            args.write_env,
-            {
-                "ASTRA_WEB_SESSION_ID": session_id or "",
-                "ASTRA_WEB_COOKIE": cookie_header,
-            },
-        )
-        print(f"updated {args.write_env} with redacted Astra web session values")
     if not session_id:
         raise RuntimeError("No sessionId found in the selected Astra tab URL")
     if not cookie_header:
         raise RuntimeError("No Astra cookies found through CDP")
+    if args.write_env:
+        _update_env(
+            args.write_env,
+            {
+                "ASTRA_WEB_SESSION_ID": session_id,
+                "ASTRA_WEB_COOKIE": cookie_header,
+            },
+        )
+        print(f"updated {args.write_env} with redacted Astra web session values")
     return 0
 
 
@@ -142,6 +142,26 @@ def _session_id_from_tabs(tabs: list[dict]) -> str | None:
         if session_id:
             return session_id
     return None
+
+
+def _session_id_from_dom(cdp: SimpleCdp) -> str | None:
+    """Extract sessionId from the loaded Astra dashboard HTML."""
+    result = cdp.command(
+        "Runtime.evaluate",
+        {
+            "expression": (
+                "(() => {"
+                "const html = document.documentElement.outerHTML;"
+                "const matches = [...html.matchAll(/sessionId[\\\"'=:\\\\s]*([^\\\"'&< >]{8,})/gi)]"
+                ".map(m => m[1]).filter(v => /^[0-9a-f]{32}$/i.test(v));"
+                "return matches[0] || '';"
+                "})()"
+            ),
+            "returnByValue": True,
+        },
+    )
+    value = ((result.get("result") or {}).get("value") or "").strip()
+    return value or None
 
 
 def _redact_session_id(url: str) -> str:
