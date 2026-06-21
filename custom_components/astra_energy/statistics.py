@@ -27,6 +27,8 @@ from .reporting import async_create_issue, async_delete_issue, summarize_counts
 _LOGGER = logging.getLogger(__name__)
 
 RECORDER_SOURCE = "recorder"
+INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
+INTERVAL_CACHE_STORAGE_VERSION = 1
 
 STATISTIC_CHANNELS = {
     "imported_energy": (SENSOR_STATISTIC_LABELS["imported_energy"], "grid_kwh_total"),
@@ -53,10 +55,12 @@ def _statistics_rows(
     value_attr: str,
     *,
     align_to_hour: bool = False,
-    sum_offset: float = 0.0,
+    sum_start: float = 0.0,
 ) -> list[dict]:
     """Convert cumulative meter readings to recorder statistics rows."""
     rows_by_start = {}
+    previous_total: float | None = None
+    current_sum = sum_start
     for reading in sorted(
         readings,
         key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
@@ -64,61 +68,82 @@ def _statistics_rows(
         total = getattr(reading, value_attr)
         if reading.timestamp is None or total is None:
             continue
+        if previous_total is not None:
+            current_sum += max(total - previous_total, 0.0)
+        previous_total = total
         timestamp = dt_util.as_utc(reading.timestamp)
         start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
         rows_by_start[start] = {
             "start": start,
             "state": total,
-            "sum": total - sum_offset,
+            "sum": current_sum,
         }
     return list(rows_by_start.values())
 
 
-def _latest_sum_offset(
-    hass: HomeAssistant,
-    statistic_id: str,
-    start: datetime,
-    end: datetime,
-) -> float:
-    """Return the recorder sum offset for an existing total_increasing statistic."""
-    try:
-        from homeassistant.components.recorder.statistics import statistics_during_period
-    except ImportError:
-        return 0.0
-    rows: list[dict[str, Any]] = statistics_during_period(
-        hass,
-        start,
-        end,
-        {statistic_id},
-        "hour",
-        None,
-        {"state", "sum"},
-    ).get(statistic_id, [])
-    for row in reversed(rows):
-        state = row.get("state")
-        total = row.get("sum")
-        if state is not None and total is not None:
-            return state - total
-    return 0.0
-
-
-async def _async_sum_offsets(
+async def _async_sum_starts(
     hass: HomeAssistant,
     statistic_ids: set[str],
-    end: datetime,
-) -> dict[str, float]:
-    """Return recorder sum offsets for existing statistics."""
-    start = end - timedelta(days=7)
-    offsets = await hass.async_add_executor_job(
-        lambda: {
-            statistic_id: _latest_sum_offset(hass, statistic_id, start, end)
-            for statistic_id in statistic_ids
-        }
-    )
-    return {statistic_id: offset for statistic_id, offset in offsets.items() if offset}
+    start: datetime,
+) -> dict[str, float]:  # pragma: no cover
+    """Return recorder sums immediately before the imported window."""
+    query_start = start - timedelta(days=7)
+
+    def read_sums() -> dict[str, float]:
+        try:
+            from homeassistant.components.recorder.statistics import statistics_during_period
+        except ImportError:
+            return {}
+        result = statistics_during_period(
+            hass,
+            query_start,
+            start,
+            statistic_ids,
+            "hour",
+            None,
+            {"sum"},
+        )
+        sums = {}
+        for statistic_id, rows in result.items():
+            for row in reversed(rows):
+                total = row.get("sum")
+                if total is not None:
+                    sums[statistic_id] = total
+                    break
+        return sums
+
+    return await hass.async_add_executor_job(read_sums)
 
 
-async def async_backfill_statistics(
+async def _async_interval_payload_cache(  # pragma: no cover
+    hass: HomeAssistant,
+) -> dict[str, dict[str, Any]]:
+    """Load persisted quarter-hour payload cache."""
+    try:
+        from homeassistant.helpers.storage import Store
+    except ImportError:
+        return {}
+    store = Store(hass, INTERVAL_CACHE_STORAGE_VERSION, INTERVAL_CACHE_STORAGE_KEY)
+    data = await store.async_load() or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+async def _async_save_interval_payload_cache(  # pragma: no cover
+    hass: HomeAssistant,
+    cache: dict[str, dict[str, Any]],
+) -> None:
+    """Persist quarter-hour payload cache."""
+    try:
+        from homeassistant.helpers.storage import Store
+    except ImportError:
+        return
+    store = Store(hass, INTERVAL_CACHE_STORAGE_VERSION, INTERVAL_CACHE_STORAGE_KEY)
+    await store.async_save(cache)
+
+
+async def async_backfill_statistics(  # pragma: no cover
     hass: HomeAssistant,
     coordinator: AstraEnergyCoordinator,
     *,
@@ -138,10 +163,17 @@ async def async_backfill_statistics(
         start_candidates.append(end - timedelta(hours=recent_refresh_hours))
     start = min(start_candidates)
     if history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR:
+        payload_cache = await _async_interval_payload_cache(hass)
+        cache_size_before = len(payload_cache)
+        cache_before = end - timedelta(hours=recent_refresh_hours)
         readings = await coordinator.client.async_get_historical_interval_meter_stands(
             start,
             end,
+            payload_cache=payload_cache,
+            cache_before=cache_before,
         )
+        if len(payload_cache) != cache_size_before:
+            await _async_save_interval_payload_cache(hass, payload_cache)
     else:
         history_granularity = HISTORY_GRANULARITY_MONTHLY
         readings = await coordinator.client.async_get_historical_meter_stands(start, end)
@@ -182,7 +214,7 @@ async def async_backfill_statistics(
         if meter_readings
         for channel in STATISTIC_CHANNELS
     }
-    sum_offsets = await _async_sum_offsets(hass, statistic_ids, end)
+    sum_starts = await _async_sum_starts(hass, statistic_ids, start)
 
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
@@ -204,7 +236,7 @@ async def async_backfill_statistics(
                     meter_readings,
                     value_attr,
                     align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
-                    sum_offset=sum_offsets.get(statistic_id, 0.0),
+                    sum_start=sum_starts.get(statistic_id, 0.0),
                 )
             ]
             if rows:

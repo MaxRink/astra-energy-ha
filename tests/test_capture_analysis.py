@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import datetime as dt
 import importlib.util
 import sys
@@ -277,6 +278,46 @@ def test_daily_interval_values_derive_grid_from_total_minus_solar() -> None:
     assert points[0]["timestamp"] == dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC)
 
 
+def test_daily_interval_spike_is_redistributed_from_fixture() -> None:
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "astra_energy_spike_day.json").read_text()
+    )
+
+    points, report = astra_api._daily_interval_values_and_report_from_payload(
+        payload,
+        dt.date(2026, 6, 15),
+    )
+
+    assert len(points) == 4
+    assert report["total_kwh_redistributed"] == 1
+    assert report["total_kwh_redistributed_buckets"] == 3
+    assert round(sum(point["total_kwh"] for point in points), 6) == 20
+    assert max(point["total_kwh"] for point in points) <= 12.5
+    assert [round(point["grid_kwh"], 6) for point in points] == [
+        round(point["total_kwh"], 6) for point in points
+    ]
+
+
+def test_daily_interval_clamps_solar_to_total() -> None:
+    points = astra_api._daily_interval_values_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "_lvb_lbl_14h": "00:15",
+                    "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                    "_lvb_vll_14h": "1.0;0.0;2.0;2.0;0.0",
+                }
+            ],
+        },
+        dt.date(2026, 6, 15),
+    )
+
+    assert points[0]["total_kwh"] == 1.0
+    assert points[0]["solar_kwh"] == 1.0
+    assert points[0]["grid_kwh"] == 0.0
+
+
 def test_overview_metrics_derive_grid_and_keep_raw_grid() -> None:
     metrics = astra_api._overview_metrics_from_payload(
         {
@@ -393,7 +434,7 @@ def test_statistics_rows_align_interval_end_timestamps_to_hour() -> None:
         {
             "start": dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
             "state": 104.0,
-            "sum": 104.0,
+            "sum": 3.0,
         }
     ]
 
@@ -411,16 +452,51 @@ def test_statistics_rows_apply_sum_offset_without_changing_state() -> None:
             )
         ],
         "grid_kwh_total",
-        sum_offset=4774.064,
+        sum_start=4774.064,
     )
 
     assert rows == [
         {
             "start": dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC),
             "state": 4784.3,
-            "sum": 10.235999999999876,
+            "sum": 4774.064,
         }
     ]
+
+
+def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=200.0,
+                grid_kwh_total=200.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=150.0,
+                grid_kwh_total=150.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 2, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=175.0,
+                grid_kwh_total=175.0,
+            ),
+        ],
+        "grid_kwh_total",
+    )
+
+    assert [row["state"] for row in rows] == [200.0, 150.0, 175.0]
+    assert [row["sum"] for row in rows] == [0.0, 0.0, 25.0]
 
 
 def test_statistics_ids_match_suggested_entity_ids() -> None:

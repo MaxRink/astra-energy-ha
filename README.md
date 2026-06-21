@@ -121,6 +121,15 @@ Energy Dashboard import stores hourly rows selected from the 15-minute source
 data; the local CSV export tool keeps the full 15-minute resolution for
 inspection.
 
+Quarter-hour payloads are cached in Home Assistant storage after the first
+successful fetch. Later imports reuse cached old days and only re-fetch the
+recent overlap window so Astra is not hammered for immutable history. The
+importer also rejects impossible negative or spike values before writing
+recorder statistics. Delayed/bunched values are redistributed over preceding
+flat intervals when possible, and impossible residential-scale spikes are
+rejected. Enable debug logging for `custom_components.astra_energy` to see API
+action timing, fetched-vs-cached day counts, and anomaly repair counters.
+
 Quality-scale tracking is in `docs/quality-scale.md`.
 
 ## Removal

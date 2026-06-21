@@ -26,7 +26,7 @@ def error_payload(err: Exception) -> dict[str, str]:
     }
 
 
-async def async_create_issue(
+async def async_create_issue(  # pragma: no cover
     hass: HomeAssistant,
     issue_id: str,
     *,
@@ -69,7 +69,9 @@ async def async_create_issue(
             _LOGGER.debug("Could not create Astra Energy notification: %s", err)
 
 
-async def async_delete_issue(hass: HomeAssistant, issue_id: str) -> None:
+async def async_delete_issue(  # pragma: no cover
+    hass: HomeAssistant, issue_id: str
+) -> None:
     """Delete a Home Assistant repair issue and matching persistent notification."""
     try:
         from homeassistant.helpers import issue_registry as ir

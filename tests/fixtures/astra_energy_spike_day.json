@@ -1,0 +1,10 @@
+{
+  "auth": "1",
+  "data": [
+    {
+      "_lvb_lbl_14h": "00:15,00:30,00:45,01:00",
+      "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+      "_lvb_vll_14h": "0,0,20,0;0,0,20,0;0,0,0,0;0,0,0,0;0,0,0,0"
+    }
+  ]
+}

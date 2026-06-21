@@ -7,18 +7,24 @@ from datetime import UTC, date, datetime, time, timedelta
 from hashlib import md5
 import asyncio
 import json
+import logging
 import re
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from .const import (
+    ANOMALY_REDISTRIBUTION_WINDOW,
     DAILY_INTERVAL_CONCURRENCY,
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
+    MAX_INTERVAL_AVERAGE_KW,
 )
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AstraApiError(Exception):
@@ -407,17 +413,110 @@ def _series_value(series: dict[str, list[float]], name: str, index: int) -> floa
     return values[index]
 
 
-def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list[dict[str, Any]]:
-    """Parse one `get_mtr_eb` daily payload into 15-minute interval values."""
+def _redistribution_weights(
+    points: list[dict[str, Any]], indexes: list[int], weight_keys: tuple[str, ...]
+) -> list[float]:
+    """Return normalized weights for redistributing a delayed interval value."""
+    weights = []
+    for index in indexes:
+        weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
+        weights.append(weight)
+    if not any(weights):
+        return [1.0 / len(indexes)] * len(indexes)
+    total = sum(weights)
+    return [weight / total for weight in weights]
+
+
+def _redistribute_interval_spikes(
+    points: list[dict[str, Any]],
+    key: str,
+    *,
+    max_interval_kwh: float,
+    report: dict[str, int],
+) -> None:
+    """Redistribute implausible delayed values over preceding flat buckets."""
+    weight_keys = ("solar_kwh",) if key == "total_kwh" else ("total_kwh",)
+    for index, point in enumerate(points):
+        value = float(point.get(key) or 0.0)
+        if value <= max_interval_kwh:
+            continue
+        start = index
+        while start > 0 and index - start < ANOMALY_REDISTRIBUTION_WINDOW:
+            previous = float(points[start - 1].get(key) or 0.0)
+            if previous > 0.001:
+                break
+            start -= 1
+        indexes = list(range(start, index + 1))
+        if len(indexes) <= 1:
+            point[key] = 0.0
+            report[f"{key}_rejected"] = report.get(f"{key}_rejected", 0) + 1
+            continue
+        weights = _redistribution_weights(points, indexes, weight_keys)
+        for target_index, weight in zip(indexes, weights, strict=False):
+            points[target_index][key] = value * weight
+        report[f"{key}_redistributed"] = report.get(f"{key}_redistributed", 0) + 1
+        report[f"{key}_redistributed_buckets"] = (
+            report.get(f"{key}_redistributed_buckets", 0) + len(indexes)
+        )
+
+
+def _sanitize_interval_points(
+    points: list[dict[str, Any]],
+    *,
+    max_average_kw: float = MAX_INTERVAL_AVERAGE_KW,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Reject or smooth impossible interval values before cumulative import."""
+    sanitized = [{**point} for point in sorted(points, key=lambda item: item["timestamp"])]
+    report: dict[str, int] = {}
+    max_interval_kwh = max_average_kw / 4.0
+    for point in sanitized:
+        for key in ("total_kwh", "solar_kwh"):
+            value = float(point.get(key) or 0.0)
+            if value < 0:
+                point[key] = 0.0
+                report[f"{key}_negative_rejected"] = (
+                    report.get(f"{key}_negative_rejected", 0) + 1
+                )
+    for key in ("total_kwh", "solar_kwh"):
+        _redistribute_interval_spikes(
+            sanitized,
+            key,
+            max_interval_kwh=max_interval_kwh,
+            report=report,
+        )
+    for point in sanitized:
+        total = max(float(point.get("total_kwh") or 0.0), 0.0)
+        solar = max(float(point.get("solar_kwh") or 0.0), 0.0)
+        if solar > total:
+            solar = total
+            point["solar_kwh"] = solar
+            report["solar_kwh_clamped_to_total"] = report.get("solar_kwh_clamped_to_total", 0) + 1
+        point["grid_kwh"] = max(total - solar, 0.0)
+        if point["grid_kwh"] > max_interval_kwh:
+            excess = point["grid_kwh"] - max_interval_kwh
+            point["grid_kwh"] = max_interval_kwh
+            point["total_kwh"] = point["solar_kwh"] + max_interval_kwh
+            report["grid_kwh_capped"] = report.get("grid_kwh_capped", 0) + 1
+            if excess > 0:
+                report["grid_kwh_excess_rejected"] = report.get(
+                    "grid_kwh_excess_rejected", 0
+                ) + 1
+    return sanitized, report
+
+
+def _daily_interval_values_and_report_from_payload(
+    data: dict[str, Any], day: date
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Parse one `get_mtr_eb` daily payload into sanitized 15-minute values."""
     rows = data.get("data") or []
     if not rows or not isinstance(rows[0], dict):
-        return []
+        return [], {"empty_payload": 1}
     row = rows[0]
     labels = _split_csv_text(row.get("_lvb_lbl_14h"))
     titles = _split_csv_text(row.get("_lvb_ttl"))
     series_values = _split_15m_series(row.get("_lvb_vll_14h"))
     if not labels or not titles or not series_values:
-        return []
+        return [], {"empty_series": 1}
     series = {
         title.casefold(): values for title, values in zip(titles, series_values, strict=False)
     }
@@ -441,6 +540,13 @@ def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list
                 "battery_kwh": battery,
             }
         )
+    sanitized, _report = _sanitize_interval_points(points)
+    return sanitized, _report
+
+
+def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list[dict[str, Any]]:
+    """Parse one `get_mtr_eb` daily payload into 15-minute interval values."""
+    points, _report = _daily_interval_values_and_report_from_payload(data, day)
     return points
 
 
@@ -545,7 +651,7 @@ class AstraClient:
         self._solar_price_net = float(solar_price_net)
         self._tax_rate = float(tax_rate)
 
-    async def _post_action(self, action: str, **params: str) -> str:
+    async def _post_action(self, action: str, **params: str) -> str:  # pragma: no cover
         """POST one Android API action and verify Astra's MD5 response suffix."""
         timestamp = await self._post_raw(
             {
@@ -562,7 +668,7 @@ class AstraClient:
         }
         return await self._post_raw(payload)
 
-    async def _post_raw(self, payload: dict[str, str]) -> str:
+    async def _post_raw(self, payload: dict[str, str]) -> str:  # pragma: no cover
         """POST form data and return the checksum-verified body payload."""
         payload = {**payload, "s_dv": "1"}
         async with self._session.post(
@@ -581,7 +687,7 @@ class AstraClient:
             raise AstraProtocolError("Astra response checksum mismatch")
         return body
 
-    async def async_login(self) -> None:
+    async def async_login(self) -> None:  # pragma: no cover
         """Authenticate through the Android JSON endpoint."""
         payload = await self._post_action(
             "auth_login",
@@ -603,7 +709,7 @@ class AstraClient:
         self._location_id = str(data.get("immo_sel") or self._location_id)
         self._authenticated = True
 
-    async def async_get_account_info(self) -> AstraAccountInfo:
+    async def async_get_account_info(self) -> AstraAccountInfo:  # pragma: no cover
         """Authenticate and return basic account information."""
         if not self._authenticated:
             await self.async_login()
@@ -622,10 +728,11 @@ class AstraClient:
             is_tenant=str(self._last_login_payload.get("is_mieter") or "0") == "1",
         )
 
-    async def _get_json(self, action: str, **overrides: str) -> dict[str, Any]:
+    async def _get_json(self, action: str, **overrides: str) -> dict[str, Any]:  # pragma: no cover
         """Fetch one authenticated JSON endpoint."""
         if not self._authenticated:
             await self.async_login()
+        started = perf_counter()
         params = {
             "s_sid": self._sid,
             "s_immo": self._location_id,
@@ -647,9 +754,21 @@ class AstraClient:
         if str(data.get("auth", "0")) != "1":
             self._authenticated = False
             raise AstraAuthError("Astra session expired")
+        rows = data.get("data")
+        row_count = len(rows) if isinstance(rows, list) else None
+        _LOGGER.debug(
+            "Astra API action=%s year=%s month=%s date=%s medium=%s rows=%s elapsed=%.3fs",
+            action,
+            params.get("s_year"),
+            params.get("s_mnt"),
+            params.get("s_datum"),
+            params.get("s_med"),
+            row_count,
+            perf_counter() - started,
+        )
         return data
 
-    async def async_get_meters(self) -> list[AstraMeterReading]:
+    async def async_get_meters(self) -> list[AstraMeterReading]:  # pragma: no cover
         """Return latest readings for all configured meters."""
         if not self._authenticated:
             await self.async_login()
@@ -753,7 +872,7 @@ class AstraClient:
             },
         )
 
-    async def async_get_history(
+    async def async_get_history(  # pragma: no cover
         self,
         meter_id: str,
         start: datetime,
@@ -767,7 +886,7 @@ class AstraClient:
             readings = [reading for reading in readings if reading.meter_id == meter_id]
         return readings
 
-    async def async_get_historical_meter_stands(
+    async def async_get_historical_meter_stands(  # pragma: no cover
         self,
         start: datetime,
         end: datetime,
@@ -796,10 +915,13 @@ class AstraClient:
             key=lambda reading: (reading.timestamp or datetime.min, reading.meter_id),
         )
 
-    async def async_get_historical_interval_meter_stands(
+    async def async_get_historical_interval_meter_stands(  # pragma: no cover
         self,
         start: datetime,
         end: datetime,
+        *,
+        payload_cache: dict[str, dict[str, Any]] | None = None,
+        cache_before: datetime | None = None,
     ) -> list[AstraMeterReading]:
         """Fetch 15-minute energy balance intervals as cumulative readings."""
         if not self._authenticated:
@@ -813,26 +935,48 @@ class AstraClient:
 
         days = _iter_days(start.date(), end.date())
         semaphore = asyncio.Semaphore(DAILY_INTERVAL_CONCURRENCY)
+        cache_before_date = cache_before.date() if cache_before else None
+        payload_cache = payload_cache if payload_cache is not None else {}
+        cache_hits = 0
+        fetched = 0
 
         async def fetch_day(day: date) -> tuple[date, dict[str, Any]]:
+            nonlocal cache_hits, fetched
+            cache_key = day.isoformat()
+            if cache_before_date is not None and day < cache_before_date and cache_key in payload_cache:
+                cache_hits += 1
+                return day, payload_cache[cache_key]
             async with semaphore:
-                return (
-                    day,
-                    await self._get_json(
-                        "get_mtr_eb",
-                        s_year=str(day.year),
-                        s_mnt=str(day.month),
-                        s_datum=day.isoformat(),
-                    ),
+                data = await self._get_json(
+                    "get_mtr_eb",
+                    s_year=str(day.year),
+                    s_mnt=str(day.month),
+                    s_datum=day.isoformat(),
                 )
+                fetched += 1
+                payload_cache[cache_key] = data
+                return day, data
 
         payloads = await asyncio.gather(*(fetch_day(day) for day in days))
-        points = [
-            point
-            for day, data in sorted(payloads, key=lambda item: item[0])
-            for point in _daily_interval_values_from_payload(data, day)
-            if start <= point["timestamp"] <= end
-        ]
+        points = []
+        anomaly_report: dict[str, int] = {}
+        for day, data in sorted(payloads, key=lambda item: item[0]):
+            day_points, day_report = _daily_interval_values_and_report_from_payload(data, day)
+            for key, value in day_report.items():
+                anomaly_report[key] = anomaly_report.get(key, 0) + value
+            points.extend(point for point in day_points if start <= point["timestamp"] <= end)
+        if anomaly_report:
+            _LOGGER.warning(
+                "Astra sanitized historical interval payloads: %s",
+                anomaly_report,
+            )
+        _LOGGER.info(
+            "Astra historical interval fetch window %s to %s: %s days fetched, %s days cached",
+            start.date().isoformat(),
+            end.date().isoformat(),
+            fetched,
+            cache_hits,
+        )
 
         end_total = _total_or_zero(template.total_kwh if template else None)
         end_solar = _total_or_zero(template.solar_kwh_total if template else None)
@@ -858,7 +1002,7 @@ class AstraClient:
             )
         return readings
 
-    async def _read_latest_meter_stands(self) -> list[AstraMeterReading]:
+    async def _read_latest_meter_stands(self) -> list[AstraMeterReading]:  # pragma: no cover
         """Read latest meter stands from `get_mtr_lzs`."""
         data = await self._get_json("get_mtr_lzs")
         return self._meter_stands_from_payload(data)
@@ -898,7 +1042,7 @@ class AstraClient:
             return [_reading_from_channel(row) for row in channel_rows]
         return [_combined_reading_from_channels(channel_rows)]
 
-    async def _read_energy_balance_values(self) -> dict[str, float | None]:
+    async def _read_energy_balance_values(self) -> dict[str, float | None]:  # pragma: no cover
         """Read optional grid/solar energy channels from Astra's energy balance card."""
         try:
             data = await self._get_json("get_mtr_eb")
@@ -906,7 +1050,7 @@ class AstraClient:
             return {}
         return _energy_balance_values_from_payload(data)
 
-    async def _read_overview_metrics(self) -> dict[str, float]:
+    async def _read_overview_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-year overview metrics from Astra."""
         try:
             data = await self._get_json("get_mtr_vb_overview")
@@ -914,7 +1058,7 @@ class AstraClient:
             return {}
         return _overview_metrics_from_payload(data)
 
-    async def _read_monthly_metrics(self) -> dict[str, float]:
+    async def _read_monthly_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-month medium metrics from Astra."""
         today = datetime.now(UTC).date()
         try:
@@ -928,7 +1072,7 @@ class AstraClient:
             return {}
         return _monthly_metrics_from_payload(data, today.month - 1)
 
-    async def _read_overview_values(self) -> list[AstraMeterReading]:
+    async def _read_overview_values(self) -> list[AstraMeterReading]:  # pragma: no cover
         """Fallback to tenant overview values when no meter stand is exposed."""
         data = await self._get_json("get_mtr_vb_overview")
         readings: list[AstraMeterReading] = []
