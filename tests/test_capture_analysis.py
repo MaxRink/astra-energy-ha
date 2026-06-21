@@ -1265,13 +1265,51 @@ def test_statistics_channels_include_historical_derived_metrics() -> None:
 
 
 def test_period_and_measurement_statistics_are_state_only() -> None:
-    assert not statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
+    assert statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
+    assert statistics.STATISTIC_CHANNELS["current_month_total_energy"].allow_reset
     assert not statistics.STATISTIC_CHANNELS["current_year_total_cost"].has_sum
     assert not statistics.STATISTIC_CHANNELS["grid_price"].has_sum
+    assert statistics.STATISTIC_CHANNELS["grid_price"].has_mean
     assert statistics.STATISTIC_CHANNELS["grid_energy_cost_total"].has_sum
 
 
-def test_state_statistics_rows_allow_period_resets_and_tax_scaling() -> None:
+def test_sum_statistics_rows_allow_period_resets() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 30, 23, 45, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                current_month_total_kwh=400.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                current_month_total_kwh=0.5,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 7, 1, 0, 30, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                current_month_total_kwh=0.8,
+            ),
+        ],
+        "current_month_total_kwh",
+        allow_reset=True,
+    )
+
+    assert [row["state"] for row in rows] == [400.0, 0.5, 0.8]
+    assert [row["sum"] for row in rows] == [0.0, 0.5, 0.8]
+
+
+def test_state_and_mean_statistics_rows_shape_values() -> None:
     rows = statistics._statistics_state_rows(
         [
             astra_api.AstraMeterReading(
@@ -1310,10 +1348,26 @@ def test_state_statistics_rows_allow_period_resets_and_tax_scaling() -> None:
         "tax_rate",
         value_multiplier=100.0,
     )
+    mean_rows = statistics._statistics_mean_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                tax_rate=0.19,
+            )
+        ],
+        "tax_rate",
+        value_multiplier=100.0,
+    )
 
     assert [row["state"] for row in rows] == [400.0, 0.5]
     assert all(row["sum"] is None for row in rows)
     assert tax_rows[0]["state"] == 19.0
+    assert mean_rows[0]["mean"] == 19.0
+    assert "state" not in mean_rows[0]
 
 
 class FakeResponse:

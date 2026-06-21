@@ -40,7 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 RECORDER_SOURCE = "recorder"
 INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
 INTERVAL_CACHE_STORAGE_VERSION = 1
-STATISTIC_IMPORT_BATCH_SIZE = 1000
+STATISTIC_IMPORT_BATCH_SIZE = 250
 
 @dataclass(frozen=True)
 class StatisticChannel:
@@ -50,6 +50,8 @@ class StatisticChannel:
     unit_class: str | None
     unit_of_measurement: str
     has_sum: bool = True
+    has_mean: bool = False
+    allow_reset: bool = False
     max_hourly_delta: bool = False
     value_multiplier: float = 1.0
 
@@ -122,59 +124,70 @@ STATISTIC_CHANNELS = {
         "current_month_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_month_solar_energy": StatisticChannel(
         "current_month_solar_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_month_total_energy": StatisticChannel(
         "current_month_total_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_year_grid_energy": StatisticChannel(
         "current_year_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_year_solar_energy": StatisticChannel(
         "current_year_solar_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_year_total_energy": StatisticChannel(
         "current_year_total_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "current_year_raw_grid_energy": StatisticChannel(
         "current_year_raw_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
+        allow_reset=True,
     ),
     "grid_price": StatisticChannel(
         "grid_price_gross_eur_per_kwh",
         None,
         "EUR/kWh",
         has_sum=False,
+        has_mean=True,
     ),
     "solar_price": StatisticChannel(
         "solar_price_gross_eur_per_kwh",
         None,
         "EUR/kWh",
         has_sum=False,
+        has_mean=True,
     ),
-    "tax_rate": StatisticChannel("tax_rate", None, "%", has_sum=False, value_multiplier=100.0),
-    "autarky": StatisticChannel("autarky_percent", None, "%", has_sum=False),
-    "pv_co2_savings": StatisticChannel("pv_co2_savings_t", None, "t", has_sum=False),
+    "tax_rate": StatisticChannel(
+        "tax_rate",
+        None,
+        "%",
+        has_sum=False,
+        has_mean=True,
+        value_multiplier=100.0,
+    ),
+    "autarky": StatisticChannel("autarky_percent", None, "%", has_sum=False, has_mean=True),
+    "pv_co2_savings": StatisticChannel(
+        "pv_co2_savings_t", None, "t", has_sum=False, has_mean=True
+    ),
 }
 
 
@@ -199,6 +212,7 @@ def _statistics_rows(
     sum_start: float = 0.0,
     state_start: float | None = None,
     max_hourly_delta: float | None = None,
+    allow_reset: bool = False,
 ) -> list[dict]:
     """Convert cumulative meter readings to recorder statistics rows."""
     rows_by_start = {}
@@ -225,6 +239,16 @@ def _statistics_rows(
         if previous_total is not None:
             delta = total - previous_total
             if delta < 0:
+                if allow_reset:
+                    current_sum += total
+                    previous_total = total
+                    previous_timestamp = timestamp
+                    rows_by_start[start] = {
+                        "start": start,
+                        "state": total,
+                        "sum": current_sum,
+                    }
+                    continue
                 _LOGGER.warning(
                     "Skipping Astra statistic rollback attr=%s start=%s previous=%s current=%s",
                     value_attr,
@@ -285,9 +309,44 @@ def _statistics_state_rows(
     return list(rows_by_start.values())
 
 
+def _statistics_mean_rows(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    align_to_hour: bool = False,
+    value_multiplier: float = 1.0,
+) -> list[dict]:
+    """Convert point-in-time readings to mean recorder statistics rows."""
+    rows_by_start = {}
+    for reading in sorted(
+        readings,
+        key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
+    ):
+        value = getattr(reading, value_attr)
+        if reading.timestamp is None or value is None:
+            continue
+        value *= value_multiplier
+        timestamp = dt_util.as_utc(reading.timestamp)
+        start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
+        rows_by_start[start] = {
+            "start": start,
+            "mean": value,
+        }
+    return list(rows_by_start.values())
+
+
 def _batches(items: list, size: int) -> list[list]:
     """Split a list into bounded batches for recorder imports."""
     return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def _statistic_data(StatisticData, row: dict):
+    """Build Home Assistant StatisticData with only populated fields."""
+    kwargs = {"start": row["start"]}
+    for key in ("state", "sum", "mean"):
+        if key in row:
+            kwargs[key] = row[key]
+    return StatisticData(**kwargs)
 
 
 async def _async_statistic_starts(
@@ -497,7 +556,11 @@ async def async_backfill_statistics(  # pragma: no cover
             statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
             metadata = StatisticMetaData(
                 has_sum=channel_def.has_sum,
-                mean_type=StatisticMeanType.NONE,
+                mean_type=(
+                    StatisticMeanType.ARITHMETIC
+                    if channel_def.has_mean
+                    else StatisticMeanType.NONE
+                ),
                 name=SENSOR_DISPLAY_NAMES[channel],
                 source=RECORDER_SOURCE,
                 statistic_id=statistic_id,
@@ -511,6 +574,7 @@ async def async_backfill_statistics(  # pragma: no cover
                     align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
                     sum_start=statistic_starts.get(statistic_id, {}).get("sum", 0.0),
                     state_start=statistic_starts.get(statistic_id, {}).get("state"),
+                    allow_reset=channel_def.allow_reset,
                     max_hourly_delta=(
                         coordinator.config_entry.options.get(
                             CONF_MAX_INTERVAL_AVERAGE_KW,
@@ -521,6 +585,13 @@ async def async_backfill_statistics(  # pragma: no cover
                     ),
                 )
                 if channel_def.has_sum
+                else _statistics_mean_rows(
+                    meter_readings,
+                    channel_def.value_attr,
+                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                    value_multiplier=channel_def.value_multiplier,
+                )
+                if channel_def.has_mean
                 else _statistics_state_rows(
                     meter_readings,
                     channel_def.value_attr,
@@ -529,7 +600,7 @@ async def async_backfill_statistics(  # pragma: no cover
                 )
             )
             rows = [
-                StatisticData(start=row["start"], state=row["state"], sum=row["sum"])
+                _statistic_data(StatisticData, row)
                 for row in row_dicts
             ]
             if rows:
