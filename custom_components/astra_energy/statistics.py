@@ -139,7 +139,12 @@ async def _async_sum_starts(
                     break
         return sums
 
-    return await hass.async_add_executor_job(read_sums)
+    try:
+        from homeassistant.components.recorder import get_instance
+    except ImportError:
+        return await hass.async_add_executor_job(read_sums)
+
+    return await get_instance(hass).async_add_executor_job(read_sums)
 
 
 async def _async_interval_payload_cache(  # pragma: no cover
