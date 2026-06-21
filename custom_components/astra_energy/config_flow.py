@@ -227,7 +227,7 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
     """Astra Energy options flow."""
 
     def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(
         self,
@@ -243,32 +243,32 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_POLL_INTERVAL,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL)),
                     vol.Required(
                         CONF_BACKFILL_DAYS,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_BACKFILL_DAYS)),
                     vol.Required(
                         CONF_RECENT_REFRESH_HOURS,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
                     vol.Required(
                         CONF_HISTORY_GRANULARITY,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_HISTORY_GRANULARITY,
                             DEFAULT_HISTORY_GRANULARITY,
                         ),
                     ): vol.In(HISTORY_GRANULARITIES),
                     vol.Required(
                         CONF_IMPORT_STATISTICS,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS
                         ),
                     ): bool,

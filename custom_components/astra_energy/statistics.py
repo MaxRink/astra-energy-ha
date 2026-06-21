@@ -16,6 +16,9 @@ from .const import (
     HISTORY_GRANULARITY_MONTHLY,
     HISTORY_GRANULARITY_QUARTER_HOUR,
     ISSUE_BACKFILL_FAILED,
+    SENSOR_DISPLAY_NAMES,
+    SENSOR_OBJECT_IDS,
+    SENSOR_STATISTIC_LABELS,
 )
 from .coordinator import AstraEnergyCoordinator
 from .reporting import async_create_issue, async_delete_issue, summarize_counts
@@ -25,15 +28,15 @@ _LOGGER = logging.getLogger(__name__)
 RECORDER_SOURCE = "recorder"
 
 STATISTIC_CHANNELS = {
-    "imported_energy": ("grid energy", "grid_kwh_total"),
-    "solar_energy": ("solar energy", "solar_kwh_total"),
-    "total_energy": ("total energy", "total_kwh"),
+    "imported_energy": (SENSOR_STATISTIC_LABELS["imported_energy"], "grid_kwh_total"),
+    "solar_energy": (SENSOR_STATISTIC_LABELS["solar_energy"], "solar_kwh_total"),
+    "total_energy": (SENSOR_STATISTIC_LABELS["total_energy"], "total_kwh"),
 }
 
 
 def _sensor_statistic_id(reading: AstraMeterReading, channel: str) -> str:
     """Return the entity statistic id used by the energy sensor."""
-    return f"sensor.astra_energy_{reading.meter_id}_{channel}"
+    return f"sensor.{SENSOR_OBJECT_IDS[channel]}"
 
 
 def _statistics_hour_start(timestamp: datetime) -> datetime:
@@ -130,13 +133,12 @@ async def async_backfill_statistics(
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
             continue
-        name = meter_readings[-1].meter_name
-        for channel, (label, value_attr) in STATISTIC_CHANNELS.items():
+        for channel, (_label, value_attr) in STATISTIC_CHANNELS.items():
             statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
             metadata = StatisticMetaData(
                 has_sum=True,
                 mean_type=StatisticMeanType.NONE,
-                name=f"Astra Energy {name} {label}",
+                name=SENSOR_DISPLAY_NAMES[channel],
                 source=RECORDER_SOURCE,
                 statistic_id=statistic_id,
                 unit_class=EnergyConverter.UNIT_CLASS,

@@ -350,6 +350,22 @@ def test_statistics_rows_align_interval_end_timestamps_to_hour() -> None:
     ]
 
 
+def test_statistics_ids_match_suggested_entity_ids() -> None:
+    reading = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978_0",
+        meter_name="1EBZ0103002978/0",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=None,
+    )
+
+    assert statistics._sensor_statistic_id(reading, "imported_energy") == (
+        "sensor.astra_grid_energy"
+    )
+    assert statistics._sensor_statistic_id(reading, "solar_energy") == ("sensor.astra_solar_energy")
+    assert statistics._sensor_statistic_id(reading, "total_energy") == ("sensor.astra_total_energy")
+
+
 def test_reporting_error_payload() -> None:
     payload = reporting.error_payload(RuntimeError("boom"))
     assert payload["type"] == "RuntimeError"

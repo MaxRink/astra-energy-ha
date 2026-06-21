@@ -21,6 +21,8 @@ from .const import (
     ATTR_RAW_METER_ID,
     ATTR_SOURCE,
     DOMAIN,
+    SENSOR_DISPLAY_NAMES,
+    SENSOR_OBJECT_IDS,
 )
 from .coordinator import AstraEnergyCoordinator
 
@@ -40,6 +42,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
     ),
     AstraSensorEntityDescription(
         key="imported_energy",
@@ -103,7 +106,7 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
     """Sensor backed by one Astra meter field."""
 
     entity_description: AstraSensorEntityDescription
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
 
     def __init__(
         self,
@@ -115,6 +118,8 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
         self._meter_id = meter_id
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{meter_id}_{description.key}"
+        self._attr_name = SENSOR_DISPLAY_NAMES[description.key]
+        self._attr_suggested_object_id = SENSOR_OBJECT_IDS[description.key]
 
     @property
     def reading(self) -> AstraMeterReading | None:
@@ -124,7 +129,7 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
     @property
     def name(self) -> str | None:
         """Return a friendly name."""
-        return None
+        return SENSOR_DISPLAY_NAMES[self.entity_description.key]
 
     @property
     def native_value(self):
@@ -144,9 +149,7 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
             ATTR_METER_ID: reading.meter_id,
             ATTR_RAW_METER_ID: reading.raw_meter_id,
             ATTR_LEGACY_METER_ID: reading.legacy_meter_id,
-            ATTR_LAST_PROVIDER_UPDATE: reading.timestamp.isoformat()
-            if reading.timestamp
-            else None,
+            ATTR_LAST_PROVIDER_UPDATE: reading.timestamp.isoformat() if reading.timestamp else None,
             ATTR_SOURCE: DOMAIN,
         }
 
@@ -154,9 +157,10 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
     def device_info(self):
         """Return device information."""
         reading = self.reading
-        name = reading.meter_name if reading else self._meter_id
         return {
             "identifiers": {(DOMAIN, self._meter_id)},
             "manufacturer": "Astra",
-            "name": name,
+            "model": "Energy meter",
+            "name": "Astra Energy Meter",
+            "serial_number": reading.raw_meter_id if reading else self._meter_id,
         }

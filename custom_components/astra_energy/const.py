@@ -36,6 +36,26 @@ ATTR_LEGACY_METER_ID = "legacy_meter_id"
 ATTR_LAST_PROVIDER_UPDATE = "last_provider_update"
 ATTR_SOURCE = "source"
 
+SENSOR_DISPLAY_NAMES = {
+    "power": "Astra Power",
+    "imported_energy": "Astra Grid Energy",
+    "solar_energy": "Astra Solar Energy",
+    "total_energy": "Astra Total Energy",
+    "exported_energy": "Astra Exported Energy",
+}
+SENSOR_OBJECT_IDS = {
+    "power": "astra_power",
+    "imported_energy": "astra_grid_energy",
+    "solar_energy": "astra_solar_energy",
+    "total_energy": "astra_total_energy",
+    "exported_energy": "astra_exported_energy",
+}
+SENSOR_STATISTIC_LABELS = {
+    "imported_energy": "grid energy",
+    "solar_energy": "solar energy",
+    "total_energy": "total energy",
+}
+
 ISSUE_API_AUTH = "api_auth_failed"
 ISSUE_API_UNAVAILABLE = "api_unavailable"
 ISSUE_BACKFILL_FAILED = "backfill_failed"

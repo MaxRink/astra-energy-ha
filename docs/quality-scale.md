@@ -30,7 +30,8 @@ checklist.
   unload cleanup.
 - [x] `entity-unique-id`: sensor unique IDs are stable per Astra meter hash and
   sensor type.
-- [x] `has-entity-name`: sensors set `_attr_has_entity_name = True`.
+- [x] `has-entity-name`: sensors expose explicit friendly names because this
+  provider's raw meter serial is not user-friendly as the device name.
 - [x] `runtime-data`: coordinator is stored in `ConfigEntry.runtime_data`.
 - [x] `test-before-configure`: config flow validates credentials with the
   Android API before creating entries.
@@ -76,8 +77,8 @@ checklist.
 - [x] `entity-category`: no diagnostic/config entities are currently exposed.
 - [x] `entity-device-class`: energy and power classes are assigned where
   possible.
-- [x] `entity-disabled-by-default`: exported energy is disabled by default; power
-  can remain unavailable until Astra exposes it.
+- [x] `entity-disabled-by-default`: exported energy and live power are disabled
+  by default until Astra exposes those channels for the account.
 - [x] `entity-translations`: entity names are translated.
 - [x] `exception-translations`: config-flow errors are translated.
 - [ ] `icon-translations`: not needed for device-class sensors, but can be added
