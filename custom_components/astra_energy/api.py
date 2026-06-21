@@ -1273,6 +1273,15 @@ class AstraClient:
             "grid": max(end_grid - sum(point["grid_kwh"] for point in points), 0.0),
             "solar": max(end_solar - sum(point["solar_kwh"] for point in points), 0.0),
             "total": max(end_total - sum(point["total_kwh"] for point in points), 0.0),
+            "raw_grid": max(
+                _total_or_zero(
+                    template.raw_grid_kwh_total
+                    if template and template.raw_grid_kwh_total is not None
+                    else end_grid
+                )
+                - sum(point.get("raw_grid_kwh") or point["grid_kwh"] for point in points),
+                0.0,
+            ),
             "unsmoothed_grid": max(
                 end_grid - sum(point["unsmoothed_grid_kwh"] for point in points), 0.0
             ),
@@ -1284,22 +1293,36 @@ class AstraClient:
             ),
         }
         readings: list[AstraMeterReading] = []
+        month_totals: dict[tuple[int, int], dict[str, float]] = {}
+        year_totals: dict[int, dict[str, float]] = {}
+        grid_price_gross = _round_or_none(self._grid_price_net * (1 + self._tax_rate))
+        solar_price_gross = _round_or_none(self._solar_price_net * (1 + self._tax_rate))
         for point in sorted(points, key=lambda item: item["timestamp"]):
             totals["total"] += point["total_kwh"]
             totals["solar"] += point["solar_kwh"]
             totals["grid"] += point["grid_kwh"]
+            totals["raw_grid"] += point.get("raw_grid_kwh") or point["grid_kwh"]
             totals["unsmoothed_total"] += point["unsmoothed_total_kwh"]
             totals["unsmoothed_solar"] += point["unsmoothed_solar_kwh"]
             totals["unsmoothed_grid"] += point["unsmoothed_grid_kwh"]
+            period_totals = _update_interval_period_totals(
+                point,
+                month_totals,
+                year_totals,
+                grid_price_gross=grid_price_gross,
+                solar_price_gross=solar_price_gross,
+            )
             readings.append(
                 _reading_from_interval_point(
                     point,
                     totals,
                     template=template,
-                    grid_price_gross=_round_or_none(self._grid_price_net * (1 + self._tax_rate)),
-                    solar_price_gross=_round_or_none(
-                        self._solar_price_net * (1 + self._tax_rate)
-                    ),
+                    grid_price_gross=grid_price_gross,
+                    solar_price_gross=solar_price_gross,
+                    grid_price_net=self._grid_price_net,
+                    solar_price_net=self._solar_price_net,
+                    tax_rate=self._tax_rate,
+                    period_totals=period_totals,
                 )
             )
         return readings
@@ -1475,6 +1498,61 @@ def _latest_reading_by_month(
     return result
 
 
+def _empty_period_totals() -> dict[str, float]:
+    """Return a mutable period-total bucket."""
+    return {"grid": 0.0, "solar": 0.0, "total": 0.0, "raw_grid": 0.0}
+
+
+def _update_interval_period_totals(
+    point: dict[str, Any],
+    month_totals: dict[tuple[int, int], dict[str, float]],
+    year_totals: dict[int, dict[str, float]],
+    *,
+    grid_price_gross: float | None,
+    solar_price_gross: float | None,
+) -> dict[str, float | None]:
+    """Update and return month/year running totals for one 15-minute interval."""
+    interval_start = _provider_local_timestamp(point["timestamp"] - timedelta(minutes=15))
+    month_key = (interval_start.year, interval_start.month)
+    year_key = interval_start.year
+    month = month_totals.setdefault(month_key, _empty_period_totals())
+    year = year_totals.setdefault(year_key, _empty_period_totals())
+    raw_grid = point.get("raw_grid_kwh") or point["grid_kwh"]
+    for bucket in (month, year):
+        bucket["grid"] += point["grid_kwh"]
+        bucket["solar"] += point["solar_kwh"]
+        bucket["total"] += point["total_kwh"]
+        bucket["raw_grid"] += raw_grid
+    return {
+        "current_month_grid_kwh": _round_or_none(month["grid"]),
+        "current_month_solar_kwh": _round_or_none(month["solar"]),
+        "current_month_total_kwh": _round_or_none(month["total"]),
+        "current_month_raw_grid_kwh": _round_or_none(month["raw_grid"]),
+        "current_month_grid_cost_gross_eur": _cost_gross(month["grid"], grid_price_gross),
+        "current_month_solar_cost_gross_eur": _cost_gross(month["solar"], solar_price_gross),
+        "current_month_total_cost_gross_eur": _round_or_none(
+            (_cost_gross(month["grid"], grid_price_gross) or 0.0)
+            + (_cost_gross(month["solar"], solar_price_gross) or 0.0),
+            4,
+        )
+        if grid_price_gross is not None or solar_price_gross is not None
+        else None,
+        "current_year_grid_kwh": _round_or_none(year["grid"]),
+        "current_year_solar_kwh": _round_or_none(year["solar"]),
+        "current_year_total_kwh": _round_or_none(year["total"]),
+        "current_year_raw_grid_kwh": _round_or_none(year["raw_grid"]),
+        "current_year_grid_cost_gross_eur": _cost_gross(year["grid"], grid_price_gross),
+        "current_year_solar_cost_gross_eur": _cost_gross(year["solar"], solar_price_gross),
+        "current_year_total_cost_gross_eur": _round_or_none(
+            (_cost_gross(year["grid"], grid_price_gross) or 0.0)
+            + (_cost_gross(year["solar"], solar_price_gross) or 0.0),
+            4,
+        )
+        if grid_price_gross is not None or solar_price_gross is not None
+        else None,
+    }
+
+
 def _reading_from_interval_point(
     point: dict[str, Any],
     totals: dict[str, float],
@@ -1482,12 +1560,17 @@ def _reading_from_interval_point(
     template: AstraMeterReading | None,
     grid_price_gross: float | None = None,
     solar_price_gross: float | None = None,
+    grid_price_net: float | None = None,
+    solar_price_net: float | None = None,
+    tax_rate: float | None = None,
+    period_totals: dict[str, float | None] | None = None,
 ) -> AstraMeterReading:
     """Build one cumulative reading from a 15-minute interval point."""
     meter_id = template.meter_id if template else "astra_meter"
     meter_name = template.meter_name if template else "Astra Energy Meter"
     raw_meter_id = template.raw_meter_id if template else None
     legacy_meter_id = template.legacy_meter_id if template else meter_id
+    period_totals = period_totals or {}
     return AstraMeterReading(
         meter_id=meter_id,
         meter_name=meter_name,
@@ -1500,6 +1583,12 @@ def _reading_from_interval_point(
         unsmoothed_grid_kwh_total=totals.get("unsmoothed_grid", totals["grid"]),
         unsmoothed_solar_kwh_total=totals.get("unsmoothed_solar", totals["solar"]),
         unsmoothed_total_kwh=totals.get("unsmoothed_total", totals["total"]),
+        raw_grid_kwh_total=totals.get("raw_grid"),
+        grid_price_net_eur_per_kwh=grid_price_net,
+        grid_price_gross_eur_per_kwh=grid_price_gross,
+        solar_price_net_eur_per_kwh=solar_price_net,
+        solar_price_gross_eur_per_kwh=solar_price_gross,
+        tax_rate=tax_rate,
         grid_cost_total_gross_eur=_cost_gross(totals["grid"], grid_price_gross),
         solar_cost_total_gross_eur=_cost_gross(totals["solar"], solar_price_gross),
         total_cost_total_gross_eur=_round_or_none(
@@ -1509,6 +1598,32 @@ def _reading_from_interval_point(
         )
         if grid_price_gross is not None or solar_price_gross is not None
         else None,
+        current_month_grid_kwh=period_totals.get("current_month_grid_kwh"),
+        current_month_solar_kwh=period_totals.get("current_month_solar_kwh"),
+        current_month_total_kwh=period_totals.get("current_month_total_kwh"),
+        current_month_raw_grid_kwh=period_totals.get("current_month_raw_grid_kwh"),
+        current_month_grid_cost_gross_eur=period_totals.get(
+            "current_month_grid_cost_gross_eur"
+        ),
+        current_month_solar_cost_gross_eur=period_totals.get(
+            "current_month_solar_cost_gross_eur"
+        ),
+        current_month_total_cost_gross_eur=period_totals.get(
+            "current_month_total_cost_gross_eur"
+        ),
+        current_year_grid_kwh=period_totals.get("current_year_grid_kwh"),
+        current_year_solar_kwh=period_totals.get("current_year_solar_kwh"),
+        current_year_total_kwh=period_totals.get("current_year_total_kwh"),
+        current_year_raw_grid_kwh=period_totals.get("current_year_raw_grid_kwh"),
+        current_year_grid_cost_gross_eur=period_totals.get(
+            "current_year_grid_cost_gross_eur"
+        ),
+        current_year_solar_cost_gross_eur=period_totals.get(
+            "current_year_solar_cost_gross_eur"
+        ),
+        current_year_total_cost_gross_eur=period_totals.get(
+            "current_year_total_cost_gross_eur"
+        ),
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
         raw={
@@ -1522,5 +1637,8 @@ def _reading_from_interval_point(
             "unsmoothed_interval_solar_kwh": point.get("unsmoothed_solar_kwh"),
             "raw_grid_kwh": point.get("raw_grid_kwh"),
             "grid_source": "derived_total_minus_solar",
+            "period_totals": {
+                key: value for key, value in period_totals.items() if value is not None
+            },
         },
     )

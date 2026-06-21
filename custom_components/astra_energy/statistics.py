@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -39,13 +40,139 @@ RECORDER_SOURCE = "recorder"
 INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
 INTERVAL_CACHE_STORAGE_VERSION = 1
 
+@dataclass(frozen=True)
+class StatisticChannel:
+    """Recorder import description for one Astra sensor."""
+
+    value_attr: str
+    unit_class: str | None
+    unit_of_measurement: str
+    has_sum: bool = True
+    max_hourly_delta: bool = False
+    value_multiplier: float = 1.0
+
+
 STATISTIC_CHANNELS = {
-    "imported_energy": ("grid_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
-    "solar_energy": ("solar_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
-    "total_energy": ("total_kwh", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
-    "grid_energy_cost_total": ("grid_cost_total_gross_eur", None, "EUR"),
-    "solar_energy_cost_total": ("solar_cost_total_gross_eur", None, "EUR"),
-    "total_energy_cost_total": ("total_cost_total_gross_eur", None, "EUR"),
+    "imported_energy": StatisticChannel(
+        "grid_kwh_total",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        max_hourly_delta=True,
+    ),
+    "solar_energy": StatisticChannel(
+        "solar_kwh_total",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        max_hourly_delta=True,
+    ),
+    "total_energy": StatisticChannel(
+        "total_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        max_hourly_delta=True,
+    ),
+    "raw_grid_energy": StatisticChannel(
+        "raw_grid_kwh_total",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        max_hourly_delta=True,
+    ),
+    "grid_energy_cost_total": StatisticChannel("grid_cost_total_gross_eur", None, "EUR"),
+    "solar_energy_cost_total": StatisticChannel("solar_cost_total_gross_eur", None, "EUR"),
+    "total_energy_cost_total": StatisticChannel("total_cost_total_gross_eur", None, "EUR"),
+    "current_month_grid_energy": StatisticChannel(
+        "current_month_grid_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_month_solar_energy": StatisticChannel(
+        "current_month_solar_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_month_total_energy": StatisticChannel(
+        "current_month_total_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_month_grid_cost": StatisticChannel(
+        "current_month_grid_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_month_solar_cost": StatisticChannel(
+        "current_month_solar_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_month_total_cost": StatisticChannel(
+        "current_month_total_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_grid_energy": StatisticChannel(
+        "current_year_grid_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_year_solar_energy": StatisticChannel(
+        "current_year_solar_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_year_total_energy": StatisticChannel(
+        "current_year_total_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_year_raw_grid_energy": StatisticChannel(
+        "current_year_raw_grid_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
+        has_sum=False,
+    ),
+    "current_year_grid_cost": StatisticChannel(
+        "current_year_grid_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_solar_cost": StatisticChannel(
+        "current_year_solar_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_total_cost": StatisticChannel(
+        "current_year_total_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "grid_price": StatisticChannel(
+        "grid_price_gross_eur_per_kwh",
+        None,
+        "EUR/kWh",
+        has_sum=False,
+    ),
+    "solar_price": StatisticChannel(
+        "solar_price_gross_eur_per_kwh",
+        None,
+        "EUR/kWh",
+        has_sum=False,
+    ),
+    "tax_rate": StatisticChannel("tax_rate", None, "%", has_sum=False, value_multiplier=100.0),
+    "autarky": StatisticChannel("autarky_percent", None, "%", has_sum=False),
+    "pv_co2_savings": StatisticChannel("pv_co2_savings_t", None, "t", has_sum=False),
 }
 
 
@@ -125,6 +252,33 @@ def _statistics_rows(
             "start": start,
             "state": total,
             "sum": current_sum,
+        }
+    return list(rows_by_start.values())
+
+
+def _statistics_state_rows(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    align_to_hour: bool = False,
+    value_multiplier: float = 1.0,
+) -> list[dict]:
+    """Convert point-in-time readings to state-only recorder statistics rows."""
+    rows_by_start = {}
+    for reading in sorted(
+        readings,
+        key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
+    ):
+        value = getattr(reading, value_attr)
+        if reading.timestamp is None or value is None:
+            continue
+        value *= value_multiplier
+        timestamp = dt_util.as_utc(reading.timestamp)
+        start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
+        rows_by_start[start] = {
+            "start": start,
+            "state": value,
+            "sum": None,
         }
     return list(rows_by_start.values())
 
@@ -332,22 +486,21 @@ async def async_backfill_statistics(  # pragma: no cover
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
             continue
-        for channel, (value_attr, unit_class, unit_of_measurement) in STATISTIC_CHANNELS.items():
+        for channel, channel_def in STATISTIC_CHANNELS.items():
             statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
             metadata = StatisticMetaData(
-                has_sum=True,
+                has_sum=channel_def.has_sum,
                 mean_type=StatisticMeanType.NONE,
                 name=SENSOR_DISPLAY_NAMES[channel],
                 source=RECORDER_SOURCE,
                 statistic_id=statistic_id,
-                unit_class=unit_class,
-                unit_of_measurement=unit_of_measurement,
+                unit_class=channel_def.unit_class,
+                unit_of_measurement=channel_def.unit_of_measurement,
             )
-            rows = [
-                StatisticData(start=row["start"], state=row["state"], sum=row["sum"])
-                for row in _statistics_rows(
+            row_dicts = (
+                _statistics_rows(
                     meter_readings,
-                    value_attr,
+                    channel_def.value_attr,
                     align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
                     sum_start=statistic_starts.get(statistic_id, {}).get("sum", 0.0),
                     state_start=statistic_starts.get(statistic_id, {}).get("state"),
@@ -356,10 +509,21 @@ async def async_backfill_statistics(  # pragma: no cover
                             CONF_MAX_INTERVAL_AVERAGE_KW,
                             DEFAULT_MAX_INTERVAL_AVERAGE_KW,
                         )
-                        if unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+                        if channel_def.max_hourly_delta
                         else None
                     ),
                 )
+                if channel_def.has_sum
+                else _statistics_state_rows(
+                    meter_readings,
+                    channel_def.value_attr,
+                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                    value_multiplier=channel_def.value_multiplier,
+                )
+            )
+            rows = [
+                StatisticData(start=row["start"], state=row["state"], sum=row["sum"])
+                for row in row_dicts
             ]
             if rows:
                 try:

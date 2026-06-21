@@ -819,8 +819,27 @@ def test_interval_point_reading_uses_cumulative_totals() -> None:
             raw_meter_id="raw_1",
             legacy_meter_id="legacy_1",
         ),
+        grid_price_net=0.294,
         grid_price_gross=0.35,
+        solar_price_net=0.21,
         solar_price_gross=0.25,
+        tax_rate=0.19,
+        period_totals={
+            "current_month_grid_kwh": 7.0,
+            "current_month_solar_kwh": 3.0,
+            "current_month_total_kwh": 10.0,
+            "current_month_raw_grid_kwh": 9.0,
+            "current_month_grid_cost_gross_eur": 2.45,
+            "current_month_solar_cost_gross_eur": 0.75,
+            "current_month_total_cost_gross_eur": 3.2,
+            "current_year_grid_kwh": 70.0,
+            "current_year_solar_kwh": 30.0,
+            "current_year_total_kwh": 100.0,
+            "current_year_raw_grid_kwh": 90.0,
+            "current_year_grid_cost_gross_eur": 24.5,
+            "current_year_solar_cost_gross_eur": 7.5,
+            "current_year_total_cost_gross_eur": 32.0,
+        },
     )
 
     assert reading.meter_id == "meter_1"
@@ -828,11 +847,59 @@ def test_interval_point_reading_uses_cumulative_totals() -> None:
     assert reading.solar_kwh_total == 23.0
     assert reading.total_kwh == 110.0
     assert reading.unsmoothed_grid_kwh_total == 87.0
+    assert reading.raw_grid_kwh_total is None
+    assert reading.grid_price_net_eur_per_kwh == 0.294
+    assert reading.grid_price_gross_eur_per_kwh == 0.35
+    assert reading.solar_price_net_eur_per_kwh == 0.21
+    assert reading.tax_rate == 0.19
     assert reading.grid_cost_total_gross_eur == 30.45
     assert reading.solar_cost_total_gross_eur == 5.75
     assert reading.total_cost_total_gross_eur == 36.2
+    assert reading.current_month_total_kwh == 10.0
+    assert reading.current_month_total_cost_gross_eur == 3.2
+    assert reading.current_year_raw_grid_kwh == 90.0
+    assert reading.current_year_total_cost_gross_eur == 32.0
     assert reading.power_w == 40000.0
     assert reading.raw["grid_source"] == "derived_total_minus_solar"
+    assert reading.raw["period_totals"]["current_year_total_kwh"] == 100.0
+
+
+def test_interval_period_totals_use_interval_start_period() -> None:
+    month_totals: dict[tuple[int, int], dict[str, float]] = {}
+    year_totals: dict[int, dict[str, float]] = {}
+
+    first = astra_api._update_interval_period_totals(
+        {
+            "timestamp": dt.datetime(2026, 7, 1, 0, 0, tzinfo=dt.UTC),
+            "total_kwh": 1.0,
+            "grid_kwh": 0.75,
+            "solar_kwh": 0.25,
+            "raw_grid_kwh": 0.8,
+        },
+        month_totals,
+        year_totals,
+        grid_price_gross=0.35,
+        solar_price_gross=0.25,
+    )
+    second = astra_api._update_interval_period_totals(
+        {
+            "timestamp": dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+            "total_kwh": 2.0,
+            "grid_kwh": 1.5,
+            "solar_kwh": 0.5,
+            "raw_grid_kwh": 1.6,
+        },
+        month_totals,
+        year_totals,
+        grid_price_gross=0.35,
+        solar_price_gross=0.25,
+    )
+
+    assert first["current_month_total_kwh"] == 1.0
+    assert first["current_month_raw_grid_kwh"] == 0.8
+    assert first["current_month_total_cost_gross_eur"] == 0.325
+    assert second["current_month_total_kwh"] == 3.0
+    assert second["current_year_grid_cost_gross_eur"] == 0.7875
 
 
 def test_reading_with_metrics_adds_prices_costs_and_raw_payload() -> None:
@@ -1155,12 +1222,98 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     assert statistics._sensor_statistic_id(reading, "total_energy_cost_total") == (
         "sensor.astra_total_energy_cost_total"
     )
+    assert statistics._sensor_statistic_id(reading, "current_month_total_cost") == (
+        "sensor.astra_current_month_total_cost"
+    )
+    assert statistics._sensor_statistic_id(reading, "current_year_total_energy") == (
+        "sensor.astra_current_year_total_energy"
+    )
+    assert statistics._sensor_statistic_id(reading, "grid_price") == (
+        "sensor.astra_grid_energy_price"
+    )
 
 
 def test_unsmoothed_diagnostic_sensors_are_not_imported_to_recorder_statistics() -> None:
     assert "unsmoothed_imported_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_solar_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_total_energy" not in statistics.STATISTIC_CHANNELS
+
+
+def test_statistics_channels_include_historical_derived_metrics() -> None:
+    for channel in {
+        "raw_grid_energy",
+        "current_month_grid_energy",
+        "current_month_solar_energy",
+        "current_month_total_energy",
+        "current_month_grid_cost",
+        "current_month_solar_cost",
+        "current_month_total_cost",
+        "current_year_grid_energy",
+        "current_year_solar_energy",
+        "current_year_total_energy",
+        "current_year_raw_grid_energy",
+        "current_year_grid_cost",
+        "current_year_solar_cost",
+        "current_year_total_cost",
+        "grid_price",
+        "solar_price",
+        "tax_rate",
+        "autarky",
+        "pv_co2_savings",
+    }:
+        assert channel in statistics.STATISTIC_CHANNELS
+
+
+def test_period_and_measurement_statistics_are_state_only() -> None:
+    assert not statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
+    assert not statistics.STATISTIC_CHANNELS["current_year_total_cost"].has_sum
+    assert not statistics.STATISTIC_CHANNELS["grid_price"].has_sum
+    assert statistics.STATISTIC_CHANNELS["grid_energy_cost_total"].has_sum
+
+
+def test_state_statistics_rows_allow_period_resets_and_tax_scaling() -> None:
+    rows = statistics._statistics_state_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 30, 23, 45, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                current_month_total_kwh=400.0,
+                tax_rate=0.19,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                current_month_total_kwh=0.5,
+                tax_rate=0.19,
+            ),
+        ],
+        "current_month_total_kwh",
+        align_to_hour=True,
+    )
+    tax_rows = statistics._statistics_state_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                tax_rate=0.19,
+            )
+        ],
+        "tax_rate",
+        value_multiplier=100.0,
+    )
+
+    assert [row["state"] for row in rows] == [400.0, 0.5]
+    assert all(row["sum"] is None for row in rows)
+    assert tax_rows[0]["state"] == 19.0
 
 
 class FakeResponse:
