@@ -191,6 +191,28 @@ python3 -m pytest -q
 - The portal uses ISO-8859-1 HTML and PHP endpoints.
 - The browser login uses reCAPTCHA and is therefore less suitable for unattended
   Home Assistant polling than the Android API.
+- The browser login page loads reCAPTCHA v3 with sitekey
+  `6LdWT-AZAAAAAA4XSFlDy4EL6k-TPw-ibrptnsy7`. The frontend JavaScript calls
+  `grecaptcha.execute(..., {action: "login"})`, writes the returned token to
+  `g-recaptcha-response`, sets `EULA_OK=1`, and submits `csloginw.php`.
+- Direct login POST probes with the account credentials and missing, empty, or
+  bogus `g-recaptcha-response` all returned the login page and did not include
+  a session/bootstrap response. That means the web backend enforces a valid
+  reCAPTCHA token; the field is not just cosmetic.
+- FlareSolverr `3.5.0` at `http://192.168.1.104:31027/v1` fetched the login
+  page and reported `Challenge not detected!`; it did not remove the reCAPTCHA
+  requirement.
+- Byparr `2.1.0` at `http://192.168.1.104:30230/v1` is reachable and can fetch
+  simple pages, but returned HTTP 500 for the Astra login page in the observed
+  probe. Its request schema is FlareSolverr-like but uses `max_timeout` seconds
+  instead of `maxTimeout` milliseconds.
+- Local retest helper:
+
+  ```sh
+  python3 tools/astra_web_login_probe.py \
+    --flaresolverr-url http://192.168.1.104:31027/v1 \
+    --byparr-url http://192.168.1.104:30230/v1
+  ```
 
 ## Confirmed Web Endpoints
 

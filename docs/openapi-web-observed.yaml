@@ -32,6 +32,7 @@ paths:
                   const: Submit
                 g-recaptcha-response:
                   type: string
+                  description: Required reCAPTCHA v3 token. Missing, empty, and bogus probe values returned the login page without a session.
       responses:
         "200":
           description: Login response/frame bootstrap.
