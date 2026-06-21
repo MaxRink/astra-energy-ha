@@ -6,6 +6,14 @@ info:
     Reverse-engineered documentation for the Astra Cockpit Android API.
     This is not an official Astra specification. Schemas are based on static
     analysis of `de.astra_software.astracockpit` and observed web/API behavior.
+    Local Android APK analyzed: versionName 1.0.14, versionCode 16.
+
+    Recheck on 2026-06-21: the endpoint returned HTTP 200 with an empty body for
+    unauthenticated `get_ts`, before credentials were used. This may indicate
+    temporary backend behavior, backend filtering, or a mobile protocol change.
+    Public App Store metadata shows a newer iOS app
+    `de.astra-software.astracockpit` version 1.3 released 2026-03-26; that app
+    should be analyzed if the Android endpoint remains empty.
 servers:
   - url: https://astra-cloud.com
 paths:

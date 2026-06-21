@@ -10,6 +10,8 @@ WebView wrapper. Static analysis of the installed APK found the primary API:
 - Every request includes `s_dv=1`.
 - Every response is `<payload><md5(payload)>`; the client must verify the last
   32 characters before parsing the payload.
+- Local APK version analyzed: package `de.astra_software.astracockpit`,
+  `versionName=1.0.14`, `versionCode=16`.
 
 OpenAPI reference: [openapi-astra-android.yaml](openapi-astra-android.yaml).
 
@@ -162,6 +164,53 @@ validated live.
 - `data[0]` fields parsed by the APK: `_vll1` through `_vll6`, `_lbl6`,
   `_ttl1`, `_ttl1_1`, and `_ttl2` through `_ttl6`.
 
+### Android Backend Recheck, 2026-06-21
+
+The previously working Android endpoint currently returns HTTP 200 with an empty
+body for `get_ts` before credentials are used. This was reproduced against both
+`https://astra-cloud.com/readyxnet/source/login/csandroid.php` and
+`https://astra-cloud.com/astra04/readyxnet/source/login/csandroid.php`.
+
+App-like `User-Agent`, `Accept`, `Origin`, `Referer`, and explicit UTF-8 content
+type headers did not change the empty response. Alternate simple timestamp
+action/signature guesses also returned empty 200 responses. This suggests either
+temporary backend behavior, IP/backend filtering, or a protocol change in a
+newer mobile app. It is not evidence of bad credentials because the failure
+happens at unauthenticated timestamp fetch.
+
+Use this schema-only probe for bounded future checks:
+
+```sh
+python3 tools/astra_endpoint_discovery.py \
+  --actions get_mtr_preis,get_gemeinstrom \
+  --out captures/astra-endpoint-discovery-latest.json
+```
+
+## Confirmed iOS App Metadata
+
+Public App Store metadata identifies an iOS app:
+
+- App Store ID: `1516855287`
+- Bundle ID: `de.astra-software.astracockpit`
+- Version observed via Apple lookup: `1.3`
+- Current version release date: `2026-03-26T07:54:00Z`
+- Size: `2893824` bytes
+- Languages: English and German
+- Minimum OS: iOS 13.0
+- App Store URL: `https://apps.apple.com/de/app/astra-cockpit/id1516855287`
+
+The iOS app is newer than the locally analyzed Android APK. If the Android
+`csandroid.php` endpoint keeps returning empty `get_ts`, the next best source of
+truth is static and/or dynamic iOS app analysis:
+
+1. Obtain the IPA through Apple-authenticated tooling such as `ipatool`, Apple
+   Configurator, or a paired-device export.
+2. Extract the IPA and run `strings` on the app binary for `astra-cloud.com`,
+   `readyxnet`, `s_action`, `get_ts`, and endpoint/action names.
+3. If static strings are insufficient, run the iOS app through an HTTPS proxy on
+   a test device and capture only request URLs, form keys, and response schemas.
+4. Keep IPA files and raw captures out of git.
+
 ## Local Testing
 
 The protocol can be tested without Home Assistant:
@@ -236,6 +285,17 @@ OpenAPI reference: [openapi-web-observed.yaml](openapi-web-observed.yaml).
   The physical meter graph exposes 15-minute cumulative and interval kWh points
   in tooltip text. Direct T1/T2 graph IDs returned zero curves for the observed
   2026-06-19 daily range.
+- `GET /astra04/readyxnet/source/pm/pm_repeavbenrvr.php`: linked from report
+  pages; not yet semantically decoded.
+- `GET /astra04/readyxnet/source/pm/pm_tddview.php`: linked from report pages;
+  likely a detail/table view, not yet semantically decoded.
+- `GET /astra04/readyxnet/source/pm/pm_zs3.php`: linked from report pages; not
+  yet semantically decoded.
+- `GET /astra04/readyxnet/source/pm/pm_prbzgwwadd.php`: linked from the warning
+  settings page; likely an add/edit flow for warning limits.
+- `GET /astra04/readyxnet/source/pm/pm_setper.php`, `pm_setvbint.php`,
+  `pm_setvgper.php`, `pm_setatper.php`, and `pm_setcvis.php`: linked from graph
+  pages; likely graph period/visibility preference endpoints.
 
 Widget RPC methods observed:
 

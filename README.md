@@ -32,6 +32,14 @@ To capture all known raw Android API payloads for local analysis:
 python3 tools/astra_raw_dump.py
 ```
 
+To probe candidate mobile action names without printing raw account data:
+
+```sh
+python3 tools/astra_endpoint_discovery.py \
+  --actions get_mtr_preis,get_gemeinstrom \
+  --out captures/astra-endpoint-discovery-latest.json
+```
+
 The dump is written below `captures/`, which is gitignored because it contains
 private meter identifiers and consumption data.
 
@@ -97,6 +105,11 @@ adb pull <package-path> captures/android/apks/base.apk
 jadx -d captures/android/jadx/base captures/android/apks/base.apk
 apktool d -f -o captures/android/apktool/base captures/android/apks/base.apk
 ```
+
+Public App Store metadata also shows an iOS app, bundle
+`de.astra-software.astracockpit`, version `1.3`. If the Android endpoint stops
+returning data, obtain the IPA with Apple-authenticated tooling and repeat the
+static string/API analysis against the iOS binary.
 
 ## Home Assistant Development
 

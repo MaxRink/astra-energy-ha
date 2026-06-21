@@ -124,6 +124,69 @@ paths:
       responses:
         "200":
           description: HTML settings page.
+  /astra04/readyxnet/source/pm/pm_prbzgwwadd.php:
+    get:
+      summary: Warning/limit add or edit page
+      description: Linked from `pm_prbzgww.php`; semantics not yet decoded.
+      responses:
+        "200":
+          description: HTML settings content.
+  /astra04/readyxnet/source/pm/pm_repeavbenrvr.php:
+    get:
+      summary: Linked report helper page
+      description: Linked from observed consumption report pages; semantics not yet decoded.
+      responses:
+        "200":
+          description: HTML report/helper content.
+  /astra04/readyxnet/source/pm/pm_tddview.php:
+    get:
+      summary: Linked table/detail view
+      description: Linked from observed consumption report pages; semantics not yet decoded.
+      responses:
+        "200":
+          description: HTML table/detail content.
+  /astra04/readyxnet/source/pm/pm_zs3.php:
+    get:
+      summary: Linked report helper page
+      description: Linked from observed consumption report pages; semantics not yet decoded.
+      responses:
+        "200":
+          description: HTML report/helper content.
+  /astra04/readyxnet/source/pm/pm_setper.php:
+    get:
+      summary: Graph period preference endpoint
+      description: Linked from observed graph pages; likely stores graph period preference.
+      responses:
+        "200":
+          description: HTML or redirect response.
+  /astra04/readyxnet/source/pm/pm_setvbint.php:
+    get:
+      summary: Graph interval preference endpoint
+      description: Linked from observed graph pages; likely stores graph interval preference.
+      responses:
+        "200":
+          description: HTML or redirect response.
+  /astra04/readyxnet/source/pm/pm_setvgper.php:
+    get:
+      summary: Graph comparison period preference endpoint
+      description: Linked from observed graph pages; likely stores graph comparison period preference.
+      responses:
+        "200":
+          description: HTML or redirect response.
+  /astra04/readyxnet/source/pm/pm_setatper.php:
+    get:
+      summary: Graph autarky period preference endpoint
+      description: Linked from observed graph pages; likely stores graph period preference.
+      responses:
+        "200":
+          description: HTML or redirect response.
+  /astra04/readyxnet/source/pm/pm_setcvis.php:
+    get:
+      summary: Graph curve visibility preference endpoint
+      description: Linked from observed graph pages; likely stores graph curve visibility preference.
+      responses:
+        "200":
+          description: HTML or redirect response.
 components:
   schemas:
     WidgetRpcRequest:
