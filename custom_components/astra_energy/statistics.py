@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -39,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 RECORDER_SOURCE = "recorder"
 INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
 INTERVAL_CACHE_STORAGE_VERSION = 1
+STATISTIC_IMPORT_BATCH_SIZE = 1000
 
 @dataclass(frozen=True)
 class StatisticChannel:
@@ -53,6 +55,45 @@ class StatisticChannel:
 
 
 STATISTIC_CHANNELS = {
+    "grid_energy_cost_total": StatisticChannel("grid_cost_total_gross_eur", None, "EUR"),
+    "solar_energy_cost_total": StatisticChannel("solar_cost_total_gross_eur", None, "EUR"),
+    "total_energy_cost_total": StatisticChannel("total_cost_total_gross_eur", None, "EUR"),
+    "current_month_grid_cost": StatisticChannel(
+        "current_month_grid_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_month_solar_cost": StatisticChannel(
+        "current_month_solar_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_month_total_cost": StatisticChannel(
+        "current_month_total_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_grid_cost": StatisticChannel(
+        "current_year_grid_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_solar_cost": StatisticChannel(
+        "current_year_solar_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
+    "current_year_total_cost": StatisticChannel(
+        "current_year_total_cost_gross_eur",
+        None,
+        "EUR",
+        has_sum=False,
+    ),
     "imported_energy": StatisticChannel(
         "grid_kwh_total",
         EnergyConverter.UNIT_CLASS,
@@ -77,9 +118,6 @@ STATISTIC_CHANNELS = {
         UnitOfEnergy.KILO_WATT_HOUR,
         max_hourly_delta=True,
     ),
-    "grid_energy_cost_total": StatisticChannel("grid_cost_total_gross_eur", None, "EUR"),
-    "solar_energy_cost_total": StatisticChannel("solar_cost_total_gross_eur", None, "EUR"),
-    "total_energy_cost_total": StatisticChannel("total_cost_total_gross_eur", None, "EUR"),
     "current_month_grid_energy": StatisticChannel(
         "current_month_grid_kwh",
         EnergyConverter.UNIT_CLASS,
@@ -96,24 +134,6 @@ STATISTIC_CHANNELS = {
         "current_month_total_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_month_grid_cost": StatisticChannel(
-        "current_month_grid_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_month_solar_cost": StatisticChannel(
-        "current_month_solar_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_month_total_cost": StatisticChannel(
-        "current_month_total_cost_gross_eur",
-        None,
-        "EUR",
         has_sum=False,
     ),
     "current_year_grid_energy": StatisticChannel(
@@ -138,24 +158,6 @@ STATISTIC_CHANNELS = {
         "current_year_raw_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_year_grid_cost": StatisticChannel(
-        "current_year_grid_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_year_solar_cost": StatisticChannel(
-        "current_year_solar_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_year_total_cost": StatisticChannel(
-        "current_year_total_cost_gross_eur",
-        None,
-        "EUR",
         has_sum=False,
     ),
     "grid_price": StatisticChannel(
@@ -281,6 +283,11 @@ def _statistics_state_rows(
             "sum": None,
         }
     return list(rows_by_start.values())
+
+
+def _batches(items: list, size: int) -> list[list]:
+    """Split a list into bounded batches for recorder imports."""
+    return [items[index : index + size] for index in range(0, len(items), size)]
 
 
 async def _async_statistic_starts(
@@ -527,7 +534,11 @@ async def async_backfill_statistics(  # pragma: no cover
             ]
             if rows:
                 try:
-                    async_import_statistics(hass, metadata, rows)
+                    imported_rows = 0
+                    for batch in _batches(rows, STATISTIC_IMPORT_BATCH_SIZE):
+                        async_import_statistics(hass, metadata, batch)
+                        imported_rows += len(batch)
+                        await asyncio.sleep(0)
                 except Exception as err:  # noqa: BLE001
                     await async_create_issue(
                         hass,
@@ -544,7 +555,7 @@ async def async_backfill_statistics(  # pragma: no cover
                     ) from err
                 _LOGGER.info(
                     "Imported %s Astra statistic rows for %s",
-                    len(rows),
+                    imported_rows,
                     statistic_id,
                 )
     await async_delete_issue(hass, ISSUE_BACKFILL_FAILED)
