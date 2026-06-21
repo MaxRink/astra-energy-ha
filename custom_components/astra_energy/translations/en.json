@@ -204,6 +204,15 @@
       "solar_price": {
         "name": "Solar energy price"
       },
+      "grid_energy_cost_total": {
+        "name": "Grid energy cost total"
+      },
+      "solar_energy_cost_total": {
+        "name": "Solar energy cost total"
+      },
+      "total_energy_cost_total": {
+        "name": "Total energy cost total"
+      },
       "current_month_grid_energy": {
         "name": "Current month grid energy"
       },

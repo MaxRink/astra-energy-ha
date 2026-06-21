@@ -69,6 +69,9 @@ class AstraMeterReading:
     solar_price_net_eur_per_kwh: float | None = None
     solar_price_gross_eur_per_kwh: float | None = None
     tax_rate: float | None = None
+    grid_cost_total_gross_eur: float | None = None
+    solar_cost_total_gross_eur: float | None = None
+    total_cost_total_gross_eur: float | None = None
     current_month_grid_kwh: float | None = None
     current_month_solar_kwh: float | None = None
     current_month_total_kwh: float | None = None
@@ -995,6 +998,11 @@ class AstraClient:
         monthly_values = monthly_values or {}
         grid_price_gross = _round_or_none(self._grid_price_net * (1 + self._tax_rate))
         solar_price_gross = _round_or_none(self._solar_price_net * (1 + self._tax_rate))
+        grid_total = (
+            reading.grid_kwh_total
+            if reading.grid_kwh_total is not None
+            else reading.imported_kwh_total
+        )
         current_month_grid = monthly_values.get("current_month_grid_kwh")
         current_month_solar = monthly_values.get("current_month_solar_kwh")
         current_year_grid = overview_values.get("current_year_grid_kwh")
@@ -1006,6 +1014,15 @@ class AstraClient:
             solar_price_net_eur_per_kwh=self._solar_price_net,
             solar_price_gross_eur_per_kwh=solar_price_gross,
             tax_rate=self._tax_rate,
+            grid_cost_total_gross_eur=_cost_gross(grid_total, grid_price_gross),
+            solar_cost_total_gross_eur=_cost_gross(reading.solar_kwh_total, solar_price_gross),
+            total_cost_total_gross_eur=_round_or_none(
+                (_cost_gross(grid_total, grid_price_gross) or 0.0)
+                + (_cost_gross(reading.solar_kwh_total, solar_price_gross) or 0.0),
+                4,
+            )
+            if grid_total is not None or reading.solar_kwh_total is not None
+            else None,
             current_month_grid_kwh=current_month_grid,
             current_month_solar_kwh=current_month_solar,
             current_month_total_kwh=monthly_values.get("current_month_total_kwh"),
@@ -1239,6 +1256,10 @@ class AstraClient:
                     point,
                     totals,
                     template=template,
+                    grid_price_gross=_round_or_none(self._grid_price_net * (1 + self._tax_rate)),
+                    solar_price_gross=_round_or_none(
+                        self._solar_price_net * (1 + self._tax_rate)
+                    ),
                 )
             )
         return readings
@@ -1419,6 +1440,8 @@ def _reading_from_interval_point(
     totals: dict[str, float],
     *,
     template: AstraMeterReading | None,
+    grid_price_gross: float | None = None,
+    solar_price_gross: float | None = None,
 ) -> AstraMeterReading:
     """Build one cumulative reading from a 15-minute interval point."""
     meter_id = template.meter_id if template else "astra_meter"
@@ -1437,6 +1460,15 @@ def _reading_from_interval_point(
         unsmoothed_grid_kwh_total=totals.get("unsmoothed_grid", totals["grid"]),
         unsmoothed_solar_kwh_total=totals.get("unsmoothed_solar", totals["solar"]),
         unsmoothed_total_kwh=totals.get("unsmoothed_total", totals["total"]),
+        grid_cost_total_gross_eur=_cost_gross(totals["grid"], grid_price_gross),
+        solar_cost_total_gross_eur=_cost_gross(totals["solar"], solar_price_gross),
+        total_cost_total_gross_eur=_round_or_none(
+            (_cost_gross(totals["grid"], grid_price_gross) or 0.0)
+            + (_cost_gross(totals["solar"], solar_price_gross) or 0.0),
+            4,
+        )
+        if grid_price_gross is not None or solar_price_gross is not None
+        else None,
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
         raw={

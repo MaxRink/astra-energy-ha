@@ -1,0 +1,267 @@
+{
+  "config": {
+    "abort": {
+      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "invalid_auth": "Ungültige Zugangsdaten",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "step": {
+      "user": {
+        "title": "Astra Energy",
+        "description": "Astra-Energie-Konto verbinden.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort",
+          "base_url": "Basis-URL",
+          "poll_interval": "Abfrageintervall in Sekunden",
+          "backfill_days": "Tage für Rückimport",
+          "recent_refresh_hours": "Aktuelle Stunden erneut abrufen",
+          "history_granularity": "Verlaufsauflösung",
+          "import_statistics": "Historische Langzeitstatistiken importieren",
+          "grid_price_net": "Netzstrompreis vor Steuer in EUR/kWh",
+          "solar_price_net": "Solarstrompreis vor Steuer in EUR/kWh",
+          "tax_rate": "Steuersatz",
+          "max_interval_average_kw": "Maximal plausibler Intervall-Durchschnitt in kW",
+          "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
+          "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
+          "smoothing_lookaround_days": "Tage für Glättungsvergleich",
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+        },
+        "data_description": {
+          "username": "Astra-Cockpit-Benutzername.",
+          "password": "Astra-Cockpit-Passwort.",
+          "base_url": "Android-API-Endpunkt. Standardwert beibehalten, sofern Astra den Server nicht ändert.",
+          "poll_interval": "Wie oft Home Assistant aktuelle Zählerstände von Astra abfragt.",
+          "backfill_days": "Wie viele Tage beim Rückimport abgerufen werden.",
+          "recent_refresh_hours": "Aktueller Überlappungszeitraum, der erneut abgerufen wird, falls Astra Werte nachträglich korrigiert.",
+          "history_granularity": "Monatliche Zählerstände für effiziente Importe oder Viertelstunden-Energiebilanz für detaillierte Energy-Dashboard-Historie.",
+          "import_statistics": "Wenn für den Rückimport aktiviert, werden historische Messwerte in Recorder-Langzeitstatistiken geschrieben.",
+          "grid_price_net": "Astra liefert Preise vor deutscher MwSt. Die Preis-Entität zeigt den Bruttopreis.",
+          "solar_price_net": "Astra liefert Preise vor deutscher MwSt. Die Preis-Entität zeigt den Bruttopreis.",
+          "tax_rate": "Steuersatz als Dezimalzahl, zum Beispiel 0.19 für 19 %.",
+          "max_interval_average_kw": "Viertelstundenwerte über dieser Durchschnittsleistung werden verworfen oder geglättet. Der Standardwert 50 kW ist für einen Haushalt bewusst hoch.",
+          "smooth_interval_anomalies": "Verzögerte Provider-Spitzen auf vorherige fehlende Blöcke verteilen, statt betroffene Stunden als fehlende Daten zu lassen.",
+          "anomaly_redistribution_window": "Maximale Anzahl vorheriger 15-Minuten-Blöcke, über die eine verzögerte Spitze verteilt werden darf.",
+          "smoothing_lookaround_days": "Gleiche Tageszeiten benachbarter Tage für Glättungsgewichte verwenden. 0 nutzt nur die Kanalform desselben Tages.",
+          "cache_interval_payloads": "Ältere tägliche Intervallantworten nach dem ersten Abruf nicht erneut herunterladen. Aktuelle Stunden werden weiterhin aktualisiert."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Astra Energy erneut authentifizieren",
+        "description": "Astra-Zugangsdaten aktualisieren.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort"
+        }
+      },
+      "reconfigure": {
+        "title": "Astra Energy neu konfigurieren",
+        "description": "Astra-Verbindungseinstellungen aktualisieren.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort",
+          "base_url": "Basis-URL",
+          "poll_interval": "Abfrageintervall in Sekunden",
+          "backfill_days": "Tage für Rückimport",
+          "recent_refresh_hours": "Aktuelle Stunden erneut abrufen",
+          "history_granularity": "Verlaufsauflösung",
+          "import_statistics": "Historische Langzeitstatistiken importieren",
+          "grid_price_net": "Netzstrompreis vor Steuer in EUR/kWh",
+          "solar_price_net": "Solarstrompreis vor Steuer in EUR/kWh",
+          "tax_rate": "Steuersatz",
+          "max_interval_average_kw": "Maximal plausibler Intervall-Durchschnitt in kW",
+          "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
+          "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
+          "smoothing_lookaround_days": "Tage für Glättungsvergleich",
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+        },
+        "data_description": {}
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Astra-Energy-Optionen",
+        "data": {
+          "poll_interval": "Abfrageintervall in Sekunden",
+          "backfill_days": "Tage für Rückimport",
+          "recent_refresh_hours": "Aktuelle Stunden erneut abrufen",
+          "history_granularity": "Verlaufsauflösung",
+          "import_statistics": "Historische Langzeitstatistiken importieren",
+          "grid_price_net": "Netzstrompreis vor Steuer in EUR/kWh",
+          "solar_price_net": "Solarstrompreis vor Steuer in EUR/kWh",
+          "tax_rate": "Steuersatz",
+          "max_interval_average_kw": "Maximal plausibler Intervall-Durchschnitt in kW",
+          "smooth_interval_anomalies": "Verzögerte Intervall-Anomalien glätten",
+          "anomaly_redistribution_window": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
+          "smoothing_lookaround_days": "Tage für Glättungsvergleich",
+          "cache_interval_payloads": "Alte Intervall-API-Antworten zwischenspeichern"
+        }
+      }
+    }
+  },
+  "services": {
+    "backfill_history": {
+      "name": "Verlauf rückimportieren",
+      "description": "Historische Astra-Zählerstände abrufen und optional in Langzeitstatistiken importieren.",
+      "fields": {
+        "backfill_days": {
+          "name": "Tage für Rückimport",
+          "description": "Anzahl der Tage, die von Astra abgerufen werden."
+        },
+        "recent_refresh_hours": {
+          "name": "Aktuelle Stunden erneut abrufen",
+          "description": "Aktuelle Überlappung erneut abrufen, nützlich wenn Astra verspätete Werte korrigiert."
+        },
+        "history_granularity": {
+          "name": "Verlaufsauflösung",
+          "description": "monthly importiert Zählerstände; quarter_hour importiert Astra-Energiebilanzwerte mit 15-Minuten-Auflösung."
+        },
+        "import_statistics": {
+          "name": "Statistiken importieren",
+          "description": "Historische Messwerte in Recorder-Langzeitstatistiken schreiben."
+        },
+        "max_interval_average_kw": {
+          "name": "Maximal plausibler Intervall-Durchschnitt in kW",
+          "description": "Den konfigurierten Anomalie-Grenzwert für diesen Rückimport überschreiben."
+        },
+        "smooth_interval_anomalies": {
+          "name": "Verzögerte Intervall-Anomalien glätten",
+          "description": "Für diesen Rückimport überschreiben, ob verzögerte Spitzen verteilt oder betroffene Stunden als fehlende Daten gelassen werden."
+        },
+        "anomaly_redistribution_window": {
+          "name": "Maximales Glättungsfenster in 15-Minuten-Blöcken",
+          "description": "Überschreibt, wie weit eine verzögerte Spitze für diesen Rückimport zurück verteilt werden darf."
+        },
+        "smoothing_lookaround_days": {
+          "name": "Tage für Glättungsvergleich",
+          "description": "Überschreibt, wie viele benachbarte Tage für Tageszeit-Gewichte genutzt werden."
+        },
+        "cache_interval_payloads": {
+          "name": "Alte Intervall-API-Antworten zwischenspeichern",
+          "description": "Überschreibt, ob ältere tägliche Intervallantworten aus dem Cache wiederverwendet werden."
+        },
+        "config_entry_id": {
+          "name": "Konfigurationseintrag-ID",
+          "description": "Optional geladene Astra-Energy-Konfigurationseintrag-ID. Leer lassen, um alle geladenen Einträge zu importieren."
+        },
+        "run_in_background": {
+          "name": "Im Hintergrund ausführen",
+          "description": "Rückimport als Hintergrundaufgabe starten und sofort zurückkehren. Nützlich für lange Viertelstunden-Importe hinter Reverse-Proxys."
+        }
+      }
+    }
+  },
+  "issues": {
+    "api_auth_failed": {
+      "title": "Astra-Energy-Authentifizierung fehlgeschlagen",
+      "description": "Astra hat die gespeicherten Zugangsdaten abgelehnt. Authentifiziere die Astra-Energy-Integration erneut. Letzter Fehler: {error}"
+    },
+    "api_unavailable": {
+      "title": "Astra-Energy-Aktualisierung fehlgeschlagen",
+      "description": "Astra Energy konnte keine Zählerdaten abrufen. Home Assistant versucht es automatisch erneut. Letzter Fehler: {error}"
+    },
+    "backfill_failed": {
+      "title": "Astra-Energy-Rückimport fehlgeschlagen",
+      "description": "Astra Energy konnte historische Statistiken nicht importieren. Letzter Fehler: {error}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power": {
+        "name": "Leistung"
+      },
+      "imported_energy": {
+        "name": "Netzstrom"
+      },
+      "solar_energy": {
+        "name": "Solarstrom"
+      },
+      "total_energy": {
+        "name": "Gesamtenergie"
+      },
+      "unsmoothed_imported_energy": {
+        "name": "Ungeglätteter Netzstrom"
+      },
+      "unsmoothed_solar_energy": {
+        "name": "Ungeglätteter Solarstrom"
+      },
+      "unsmoothed_total_energy": {
+        "name": "Ungeglättete Gesamtenergie"
+      },
+      "exported_energy": {
+        "name": "Eingespeiste Energie"
+      },
+      "raw_grid_energy": {
+        "name": "Rohwert Netzstromzähler"
+      },
+      "grid_price": {
+        "name": "Netzstrompreis"
+      },
+      "solar_price": {
+        "name": "Solarstrompreis"
+      },
+      "grid_energy_cost_total": {
+        "name": "Netzstromkosten gesamt"
+      },
+      "solar_energy_cost_total": {
+        "name": "Solarstromkosten gesamt"
+      },
+      "total_energy_cost_total": {
+        "name": "Energiekosten gesamt"
+      },
+      "current_month_grid_energy": {
+        "name": "Aktueller Monat Netzstrom"
+      },
+      "current_month_solar_energy": {
+        "name": "Aktueller Monat Solarstrom"
+      },
+      "current_month_total_energy": {
+        "name": "Aktueller Monat Gesamtenergie"
+      },
+      "current_month_grid_cost": {
+        "name": "Aktueller Monat Netzstromkosten"
+      },
+      "current_month_solar_cost": {
+        "name": "Aktueller Monat Solarstromkosten"
+      },
+      "current_month_total_cost": {
+        "name": "Aktueller Monat Gesamtkosten"
+      },
+      "current_year_grid_energy": {
+        "name": "Aktuelles Jahr Netzstrom"
+      },
+      "current_year_solar_energy": {
+        "name": "Aktuelles Jahr Solarstrom"
+      },
+      "current_year_total_energy": {
+        "name": "Aktuelles Jahr Gesamtenergie"
+      },
+      "current_year_raw_grid_energy": {
+        "name": "Aktuelles Jahr Rohwert Netzstrom"
+      },
+      "current_year_grid_cost": {
+        "name": "Aktuelles Jahr Netzstromkosten"
+      },
+      "current_year_solar_cost": {
+        "name": "Aktuelles Jahr Solarstromkosten"
+      },
+      "current_year_total_cost": {
+        "name": "Aktuelles Jahr Gesamtkosten"
+      },
+      "autarky": {
+        "name": "Autarkie"
+      },
+      "pv_co2_savings": {
+        "name": "PV-CO2-Einsparung"
+      },
+      "tax_rate": {
+        "name": "Energiesteuersatz"
+      }
+    }
+  }
+}

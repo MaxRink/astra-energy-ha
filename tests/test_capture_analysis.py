@@ -801,6 +801,8 @@ def test_interval_point_reading_uses_cumulative_totals() -> None:
             raw_meter_id="raw_1",
             legacy_meter_id="legacy_1",
         ),
+        grid_price_gross=0.35,
+        solar_price_gross=0.25,
     )
 
     assert reading.meter_id == "meter_1"
@@ -808,6 +810,9 @@ def test_interval_point_reading_uses_cumulative_totals() -> None:
     assert reading.solar_kwh_total == 23.0
     assert reading.total_kwh == 110.0
     assert reading.unsmoothed_grid_kwh_total == 87.0
+    assert reading.grid_cost_total_gross_eur == 30.45
+    assert reading.solar_cost_total_gross_eur == 5.75
+    assert reading.total_cost_total_gross_eur == 36.2
     assert reading.power_w == 40000.0
     assert reading.raw["grid_source"] == "derived_total_minus_solar"
 
@@ -837,6 +842,7 @@ def test_reading_with_metrics_adds_prices_costs_and_raw_payload() -> None:
 
     assert reading.grid_price_gross_eur_per_kwh == 0.34986
     assert reading.solar_price_gross_eur_per_kwh == 0.2499
+    assert reading.grid_cost_total_gross_eur == 34.986
     assert reading.current_month_total_cost_gross_eur == 0.4749
     assert reading.current_year_total_cost_gross_eur == 3.9984
     assert reading.raw["tariff"]["tax_rate"] == 0.19
@@ -1066,6 +1072,15 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
     assert statistics._sensor_statistic_id(reading, "unsmoothed_total_energy") == (
         "sensor.astra_unsmoothed_total_energy"
+    )
+    assert statistics._sensor_statistic_id(reading, "grid_energy_cost_total") == (
+        "sensor.astra_grid_energy_cost_total"
+    )
+    assert statistics._sensor_statistic_id(reading, "solar_energy_cost_total") == (
+        "sensor.astra_solar_energy_cost_total"
+    )
+    assert statistics._sensor_statistic_id(reading, "total_energy_cost_total") == (
+        "sensor.astra_total_energy_cost_total"
     )
 
 

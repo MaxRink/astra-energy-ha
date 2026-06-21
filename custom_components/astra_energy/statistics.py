@@ -29,7 +29,6 @@ from .const import (
     ISSUE_BACKFILL_FAILED,
     SENSOR_DISPLAY_NAMES,
     SENSOR_OBJECT_IDS,
-    SENSOR_STATISTIC_LABELS,
 )
 from .coordinator import AstraEnergyCoordinator
 from .reporting import async_create_issue, async_delete_issue, summarize_counts
@@ -41,21 +40,27 @@ INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
 INTERVAL_CACHE_STORAGE_VERSION = 1
 
 STATISTIC_CHANNELS = {
-    "imported_energy": (SENSOR_STATISTIC_LABELS["imported_energy"], "grid_kwh_total"),
-    "solar_energy": (SENSOR_STATISTIC_LABELS["solar_energy"], "solar_kwh_total"),
-    "total_energy": (SENSOR_STATISTIC_LABELS["total_energy"], "total_kwh"),
+    "imported_energy": ("grid_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
+    "solar_energy": ("solar_kwh_total", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
+    "total_energy": ("total_kwh", EnergyConverter.UNIT_CLASS, UnitOfEnergy.KILO_WATT_HOUR),
     "unsmoothed_imported_energy": (
-        SENSOR_STATISTIC_LABELS["unsmoothed_imported_energy"],
         "unsmoothed_grid_kwh_total",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
     ),
     "unsmoothed_solar_energy": (
-        SENSOR_STATISTIC_LABELS["unsmoothed_solar_energy"],
         "unsmoothed_solar_kwh_total",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
     ),
     "unsmoothed_total_energy": (
-        SENSOR_STATISTIC_LABELS["unsmoothed_total_energy"],
         "unsmoothed_total_kwh",
+        EnergyConverter.UNIT_CLASS,
+        UnitOfEnergy.KILO_WATT_HOUR,
     ),
+    "grid_energy_cost_total": ("grid_cost_total_gross_eur", None, "EUR"),
+    "solar_energy_cost_total": ("solar_cost_total_gross_eur", None, "EUR"),
+    "total_energy_cost_total": ("total_cost_total_gross_eur", None, "EUR"),
 }
 
 
@@ -282,7 +287,7 @@ async def async_backfill_statistics(  # pragma: no cover
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
             continue
-        for channel, (_label, value_attr) in STATISTIC_CHANNELS.items():
+        for channel, (value_attr, unit_class, unit_of_measurement) in STATISTIC_CHANNELS.items():
             statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
             metadata = StatisticMetaData(
                 has_sum=True,
@@ -290,8 +295,8 @@ async def async_backfill_statistics(  # pragma: no cover
                 name=SENSOR_DISPLAY_NAMES[channel],
                 source=RECORDER_SOURCE,
                 statistic_id=statistic_id,
-                unit_class=EnergyConverter.UNIT_CLASS,
-                unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                unit_class=unit_class,
+                unit_of_measurement=unit_of_measurement,
             )
             rows = [
                 StatisticData(start=row["start"], state=row["state"], sum=row["sum"])

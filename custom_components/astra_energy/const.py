@@ -77,6 +77,9 @@ SENSOR_DISPLAY_NAMES = {
     "raw_grid_energy": "Astra Raw Grid Meter Energy",
     "grid_price": "Astra Grid Energy Price",
     "solar_price": "Astra Solar Energy Price",
+    "grid_energy_cost_total": "Astra Grid Energy Cost Total",
+    "solar_energy_cost_total": "Astra Solar Energy Cost Total",
+    "total_energy_cost_total": "Astra Total Energy Cost Total",
     "current_month_grid_energy": "Astra Current Month Grid Energy",
     "current_month_solar_energy": "Astra Current Month Solar Energy",
     "current_month_total_energy": "Astra Current Month Total Energy",
@@ -106,6 +109,9 @@ SENSOR_OBJECT_IDS = {
     "raw_grid_energy": "astra_raw_grid_meter_energy",
     "grid_price": "astra_grid_energy_price",
     "solar_price": "astra_solar_energy_price",
+    "grid_energy_cost_total": "astra_grid_energy_cost_total",
+    "solar_energy_cost_total": "astra_solar_energy_cost_total",
+    "total_energy_cost_total": "astra_total_energy_cost_total",
     "current_month_grid_energy": "astra_current_month_grid_energy",
     "current_month_solar_energy": "astra_current_month_solar_energy",
     "current_month_total_energy": "astra_current_month_total_energy",
@@ -130,6 +136,9 @@ SENSOR_STATISTIC_LABELS = {
     "unsmoothed_imported_energy": "unsmoothed grid energy",
     "unsmoothed_solar_energy": "unsmoothed solar energy",
     "unsmoothed_total_energy": "unsmoothed total energy",
+    "grid_energy_cost_total": "grid energy cost",
+    "solar_energy_cost_total": "solar energy cost",
+    "total_energy_cost_total": "total energy cost",
 }
 
 ISSUE_API_AUTH = "api_auth_failed"
