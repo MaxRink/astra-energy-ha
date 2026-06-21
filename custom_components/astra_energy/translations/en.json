@@ -19,6 +19,7 @@
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
+          "history_granularity": "History granularity",
           "import_statistics": "Import historical long-term statistics"
         },
         "data_description": {
@@ -28,6 +29,7 @@
           "poll_interval": "How often Home Assistant polls Astra for current meter readings.",
           "backfill_days": "How many days to fetch when running the backfill action.",
           "recent_refresh_hours": "How many recent hours to re-fetch when running the backfill action.",
+          "history_granularity": "Use monthly meter stands for efficient imports or quarter-hour energy balance rows for detailed Energy Dashboard history.",
           "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics."
         }
       },
@@ -49,6 +51,7 @@
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
+          "history_granularity": "History granularity",
           "import_statistics": "Import historical long-term statistics"
         }
       }
@@ -62,6 +65,7 @@
           "poll_interval": "Polling interval in seconds",
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
+          "history_granularity": "History granularity",
           "import_statistics": "Import historical long-term statistics"
         }
       }
@@ -79,6 +83,10 @@
         "recent_refresh_hours": {
           "name": "Recent refresh hours",
           "description": "Recent overlap to fetch again, useful when Astra adjusts late-arriving values."
+        },
+        "history_granularity": {
+          "name": "History granularity",
+          "description": "monthly imports meter stands; quarter_hour imports Astra energy balance rows at 15-minute resolution."
         },
         "import_statistics": {
           "name": "Import statistics",

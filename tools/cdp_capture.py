@@ -17,7 +17,6 @@ import socket
 import ssl
 import struct
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -205,7 +204,9 @@ def launch_chrome(chrome_path: str, port: int, user_data_dir: Path) -> subproces
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target-url", default="https://astra-cloud.com/astra04/readyxnet/source/pm/")
+    parser.add_argument(
+        "--target-url", default="https://astra-cloud.com/astra04/readyxnet/source/pm/"
+    )
     parser.add_argument("--out", type=Path, default=Path("captures/web-login.jsonl"))
     parser.add_argument("--port", type=int, default=9222)
     parser.add_argument("--launch-chrome", action="store_true")
@@ -236,7 +237,10 @@ def main() -> int:
 
     client = CdpClient(ws_url, args.out)
     for method, params in [
-        ("Network.enable", {"maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 25_000_000}),
+        (
+            "Network.enable",
+            {"maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 25_000_000},
+        ),
         ("Page.enable", None),
         ("Runtime.enable", None),
         ("Network.setCacheDisabled", {"cacheDisabled": True}),

@@ -7,7 +7,6 @@ import argparse
 import getpass
 import hashlib
 import json
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -134,7 +133,9 @@ def main() -> int:
                 "auth": result.get("auth"),
                 "keys": sorted(result.keys()),
                 "row_count": len(rows) if isinstance(rows, list) else None,
-                "first_row_keys": sorted(rows[0].keys()) if rows and isinstance(rows[0], dict) else [],
+                "first_row_keys": sorted(rows[0].keys())
+                if rows and isinstance(rows[0], dict)
+                else [],
             },
             indent=2,
             sort_keys=True,

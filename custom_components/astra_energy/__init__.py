@@ -14,21 +14,24 @@ from .const import (
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
     CONF_CONFIG_ENTRY_ID,
+    CONF_HISTORY_GRANULARITY,
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
     DEFAULT_BACKFILL_DAYS,
+    DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_REFRESH_HOURS,
     DOMAIN,
+    HISTORY_GRANULARITIES,
     MAX_RECENT_REFRESH_HOURS,
     SERVICE_BACKFILL_HISTORY,
 )
 from .coordinator import AstraEnergyCoordinator
 from .statistics import async_backfill_statistics
 
-type AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
+AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
 
 _SERVICE_SCHEMA = vol.Schema(
     {
@@ -37,6 +40,7 @@ _SERVICE_SCHEMA = vol.Schema(
             vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)
         ),
         vol.Optional(CONF_IMPORT_STATISTICS): bool,
+        vol.Optional(CONF_HISTORY_GRANULARITY): vol.In(HISTORY_GRANULARITIES),
         vol.Optional(CONF_CONFIG_ENTRY_ID): str,
     }
 )
@@ -54,9 +58,7 @@ async def _async_backfill_history(
     if requested_entry_id:
         coordinator = coordinators.get(requested_entry_id)
         if coordinator is None:
-            raise HomeAssistantError(
-                f"Astra Energy entry is not loaded: {requested_entry_id}"
-            )
+            raise HomeAssistantError(f"Astra Energy entry is not loaded: {requested_entry_id}")
         selected = {requested_entry_id: coordinator}
     else:
         selected = coordinators
@@ -76,11 +78,16 @@ async def _async_backfill_history(
             CONF_RECENT_REFRESH_HOURS,
             entry.options.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
         )
+        history_granularity = call.data.get(
+            CONF_HISTORY_GRANULARITY,
+            entry.options.get(CONF_HISTORY_GRANULARITY, DEFAULT_HISTORY_GRANULARITY),
+        )
         response[entry_id] = await async_backfill_statistics(
             hass,
             coordinator,
             days=days,
             recent_refresh_hours=recent_refresh_hours,
+            history_granularity=history_granularity,
             import_statistics=import_statistics,
         )
     return response

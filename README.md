@@ -44,7 +44,7 @@ python3 tools/analyze_raw_dump.py captures/astra-raw-2025.json captures/astra-ra
 Live data currently shows one physical meter with Astra subchannels:
 
 - total cumulative energy from the physical meter row
-- grid energy from `T1` / `Netzbezug`
+- grid energy derived as total minus `T2` / object/PV usage
 - solar/object energy from `T2` / `Objektbezug` / `PV`
 
 The Home Assistant integration exposes those as one device with separate
@@ -112,6 +112,13 @@ By default it only fetches and logs historical readings. Enable
 `kWh` rows into recorder long-term statistics. The action can return a meter
 row-count summary to Home Assistant service callers and creates repair issues
 plus persistent notifications when API updates or statistics imports fail.
+Set `history_granularity` to `quarter_hour` to import Astra's 15-minute
+energy-balance rows; the default `monthly` mode uses the cheaper monthly meter
+stands. Quarter-hour import expands the requested start to the first day of that
+month so synthesized cumulative totals stay monotonic. Home Assistant long-term
+statistics imports must use top-of-hour timestamps, so the Energy Dashboard
+import stores hourly rows selected from the 15-minute source data; the local CSV
+export tool keeps the full 15-minute resolution for inspection.
 
 Quality-scale tracking is in `docs/quality-scale.md`.
 

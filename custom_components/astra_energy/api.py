@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from hashlib import md5
 import json
 import re
@@ -239,8 +239,14 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
         total_channel["account"],
     )
     meter_id = raw_meter_id or legacy_meter_id
-    grid_total = grid_channel["total"] if grid_channel else total_channel["total"]
     solar_total = solar_channel["total"] if solar_channel else None
+    total_kwh = total_channel["total"]
+    raw_grid_total = grid_channel["total"] if grid_channel else None
+    grid_total = (
+        max(total_kwh - solar_total, 0.0)
+        if solar_total is not None
+        else raw_grid_total or total_kwh
+    )
     return AstraMeterReading(
         meter_id=meter_id,
         meter_name=total_channel["meter_name"],
@@ -249,11 +255,15 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
         imported_kwh_total=grid_total,
         grid_kwh_total=grid_total,
         solar_kwh_total=solar_total,
-        total_kwh=total_channel["total"],
+        total_kwh=total_kwh,
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
         raw={
             "action": "get_mtr_lzs",
+            "grid_source": "derived_total_minus_solar"
+            if solar_total is not None
+            else "raw_grid_or_total",
+            "raw_grid_kwh_total": raw_grid_total,
             "channels": {
                 channel["kind"]: {
                     "raw_meter_id": channel["raw_meter_id"],
@@ -271,9 +281,7 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
     )
 
 
-def _first_channel(
-    channels: list[dict[str, Any]], kind: str
-) -> dict[str, Any] | None:
+def _first_channel(channels: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
     """Return the first channel with a matching kind."""
     return next((channel for channel in channels if channel["kind"] == kind), None)
 
@@ -291,6 +299,101 @@ def _iter_months(start: date, end: date) -> list[tuple[int, int]]:
         else:
             month += 1
     return months
+
+
+def _iter_days(start: date, end: date) -> list[date]:
+    """Return dates between start and end inclusive."""
+    days: list[date] = []
+    current = start
+    while current <= end:
+        days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _first_day_of_month(value: date) -> date:
+    """Return the first day of the month containing value."""
+    return value.replace(day=1)
+
+
+def _previous_month(value: date) -> date:
+    """Return the first day of the month before value."""
+    first = _first_day_of_month(value)
+    if first.month == 1:
+        return date(first.year - 1, 12, 1)
+    return date(first.year, first.month - 1, 1)
+
+
+def _combine_utc(day: date) -> datetime:
+    """Return a UTC midnight datetime for a date."""
+    return datetime.combine(day, time.min, tzinfo=UTC)
+
+
+def _split_csv_text(value: Any) -> list[str]:
+    """Split Astra's comma-separated label/title strings."""
+    if not value or str(value).strip() == "0":
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _split_15m_series(value: Any) -> list[list[float]]:
+    """Split Astra's semicolon/comma-separated 15-minute series values."""
+    if not value or str(value).strip() == "0":
+        return []
+    result: list[list[float]] = []
+    for part in str(value).split(";"):
+        points = []
+        for item in part.split(","):
+            parsed = _parse_number(item)
+            if parsed is not None:
+                points.append(parsed)
+        result.append(points)
+    return result
+
+
+def _series_value(series: dict[str, list[float]], name: str, index: int) -> float | None:
+    """Return one point from a named 15-minute series."""
+    values = series.get(name.casefold())
+    if not values or index >= len(values):
+        return None
+    return values[index]
+
+
+def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list[dict[str, Any]]:
+    """Parse one `get_mtr_eb` daily payload into 15-minute interval values."""
+    rows = data.get("data") or []
+    if not rows or not isinstance(rows[0], dict):
+        return []
+    row = rows[0]
+    labels = _split_csv_text(row.get("_lvb_lbl_14h"))
+    titles = _split_csv_text(row.get("_lvb_ttl"))
+    series_values = _split_15m_series(row.get("_lvb_vll_14h"))
+    if not labels or not titles or not series_values:
+        return []
+    series = {
+        title.casefold(): values for title, values in zip(titles, series_values, strict=False)
+    }
+    points: list[dict[str, Any]] = []
+    day_start = _combine_utc(day)
+    for index, label in enumerate(labels):
+        timestamp = day_start + timedelta(minutes=15 * (index + 1))
+        total = _series_value(series, "Gesamtbezug", index) or 0.0
+        pv = _series_value(series, "PV-Bezug", index)
+        solar = (pv if pv is not None else _series_value(series, "Objektbezug", index)) or 0.0
+        raw_grid = _series_value(series, "Netzbezug", index)
+        battery = _series_value(series, "Batterie-Bezug", index) or 0.0
+        points.append(
+            {
+                "timestamp": timestamp,
+                "label": label,
+                "total_kwh": total,
+                "solar_kwh": solar,
+                "grid_kwh": max(total - solar, 0.0),
+                "raw_grid_kwh": raw_grid,
+                "battery_kwh": battery,
+            }
+        )
+    return points
 
 
 class AstraClient:
@@ -433,17 +536,13 @@ class AstraClient:
                 first = readings[0]
                 readings[0] = replace(
                     first,
-                    grid_kwh_total=balance_values.get("grid_kwh_total")
-                    or first.grid_kwh_total,
-                    solar_kwh_total=balance_values.get("solar_kwh_total")
-                    or first.solar_kwh_total,
+                    grid_kwh_total=balance_values.get("grid_kwh_total") or first.grid_kwh_total,
+                    solar_kwh_total=balance_values.get("solar_kwh_total") or first.solar_kwh_total,
                     total_kwh=balance_values.get("total_kwh") or first.total_kwh,
                     raw={
                         **(first.raw or {}),
                         "energy_balance": {
-                            key: value
-                            for key, value in balance_values.items()
-                            if value is not None
+                            key: value for key, value in balance_values.items() if value is not None
                         },
                     },
                 )
@@ -492,6 +591,65 @@ class AstraClient:
             readings_by_key.values(),
             key=lambda reading: (reading.timestamp or datetime.min, reading.meter_id),
         )
+
+    async def async_get_historical_interval_meter_stands(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[AstraMeterReading]:
+        """Fetch 15-minute energy balance intervals as cumulative readings."""
+        if not self._authenticated:
+            await self.async_login()
+
+        expanded_start_date = _first_day_of_month(start.date())
+        anchor_start_date = _previous_month(expanded_start_date)
+        anchor_start = _combine_utc(anchor_start_date)
+        monthly_readings = await self.async_get_historical_meter_stands(anchor_start, end)
+        monthly_anchors = _latest_reading_by_month(monthly_readings)
+        template = monthly_readings[-1] if monthly_readings else None
+        if template is None:
+            latest = await self._read_latest_meter_stands()
+            template = latest[0] if latest else None
+
+        month_totals: dict[tuple[int, int], dict[str, float]] = {}
+        readings: list[AstraMeterReading] = []
+        for day in _iter_days(expanded_start_date, end.date()):
+            month_key = (day.year, day.month)
+            if month_key not in month_totals:
+                base = monthly_anchors.get(_previous_month(day))
+                base_total = base.total_kwh if base and base.total_kwh is not None else 0.0
+                base_solar = (
+                    base.solar_kwh_total if base and base.solar_kwh_total is not None else 0.0
+                )
+                base_grid = max(base_total - base_solar, 0.0)
+                month_totals[month_key] = {
+                    "grid": base_grid,
+                    "solar": base_solar,
+                    "total": base_total,
+                }
+
+            data = await self._get_json(
+                "get_mtr_eb",
+                s_year=str(day.year),
+                s_mnt=str(day.month),
+                s_datum=day.isoformat(),
+            )
+            for point in _daily_interval_values_from_payload(data, day):
+                totals = month_totals[month_key]
+                totals["total"] += point["total_kwh"]
+                totals["solar"] += point["solar_kwh"]
+                totals["grid"] += point["grid_kwh"]
+                timestamp = point["timestamp"]
+                if not (start <= timestamp <= end):
+                    continue
+                readings.append(
+                    _reading_from_interval_point(
+                        point,
+                        totals,
+                        template=template,
+                    )
+                )
+        return readings
 
     async def _read_latest_meter_stands(self) -> list[AstraMeterReading]:
         """Read latest meter stands from `get_mtr_lzs`."""
@@ -603,6 +761,10 @@ def _energy_balance_values_from_payload(data: dict[str, Any]) -> dict[str, float
                 visit(item, label_hint)
 
     visit(data)
+    total = values.get("total_kwh")
+    solar = values.get("solar_kwh_total")
+    if total is not None and solar is not None:
+        values["grid_kwh_total"] = max(total - solar, 0.0)
     return values
 
 
@@ -617,3 +779,54 @@ def _assign_energy_balance_value(
         values["solar_kwh_total"] = amount
     elif "gesamtbezug" in normalized or "total" in normalized:
         values["total_kwh"] = amount
+
+
+def _latest_reading_by_month(
+    readings: list[AstraMeterReading],
+) -> dict[date, AstraMeterReading]:
+    """Return the latest cumulative reading for each reading month."""
+    result: dict[date, AstraMeterReading] = {}
+    for reading in readings:
+        if reading.timestamp is None:
+            continue
+        key = _first_day_of_month(reading.timestamp.date())
+        current = result.get(key)
+        if current is None or (
+            current.timestamp is not None and reading.timestamp > current.timestamp
+        ):
+            result[key] = reading
+    return result
+
+
+def _reading_from_interval_point(
+    point: dict[str, Any],
+    totals: dict[str, float],
+    *,
+    template: AstraMeterReading | None,
+) -> AstraMeterReading:
+    """Build one cumulative reading from a 15-minute interval point."""
+    meter_id = template.meter_id if template else "astra_meter"
+    meter_name = template.meter_name if template else "Astra Energy Meter"
+    raw_meter_id = template.raw_meter_id if template else None
+    legacy_meter_id = template.legacy_meter_id if template else meter_id
+    return AstraMeterReading(
+        meter_id=meter_id,
+        meter_name=meter_name,
+        timestamp=point["timestamp"],
+        power_w=point["total_kwh"] * 4000.0,
+        imported_kwh_total=totals["grid"],
+        grid_kwh_total=totals["grid"],
+        solar_kwh_total=totals["solar"],
+        total_kwh=totals["total"],
+        raw_meter_id=raw_meter_id,
+        legacy_meter_id=legacy_meter_id,
+        raw={
+            "action": "get_mtr_eb",
+            "interval_label": point.get("label"),
+            "interval_total_kwh": point["total_kwh"],
+            "interval_grid_kwh": point["grid_kwh"],
+            "interval_solar_kwh": point["solar_kwh"],
+            "raw_grid_kwh": point.get("raw_grid_kwh"),
+            "grid_source": "derived_total_minus_solar",
+        },
+    )

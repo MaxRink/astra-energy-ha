@@ -15,15 +15,18 @@ from .api import AstraApiError, AstraAuthError, AstraClient
 from .const import (
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
+    CONF_HISTORY_GRANULARITY,
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
+    DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_REFRESH_HOURS,
     DOMAIN,
+    HISTORY_GRANULARITIES,
     MAX_BACKFILL_DAYS,
     MAX_RECENT_REFRESH_HOURS,
     MIN_POLL_INTERVAL,
@@ -75,6 +78,13 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
             vol.Required(
+                CONF_HISTORY_GRANULARITY,
+                default=defaults.get(
+                    CONF_HISTORY_GRANULARITY,
+                    DEFAULT_HISTORY_GRANULARITY,
+                ),
+            ): vol.In(HISTORY_GRANULARITIES),
+            vol.Required(
                 CONF_IMPORT_STATISTICS,
                 default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
             ): bool,
@@ -117,6 +127,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
                         CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
                         CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
+                        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
                     },
                 )
@@ -127,7 +138,9 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> config_entries.ConfigFlowResult:
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
         """Handle reauthentication."""
         self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm(entry_data)
@@ -193,6 +206,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
                         CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
                         CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
+                        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
                     },
                 )
@@ -244,9 +258,14 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
                         default=self.config_entry.options.get(
                             CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS
                         ),
-                    ): vol.All(
-                        vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)
-                    ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
+                    vol.Required(
+                        CONF_HISTORY_GRANULARITY,
+                        default=self.config_entry.options.get(
+                            CONF_HISTORY_GRANULARITY,
+                            DEFAULT_HISTORY_GRANULARITY,
+                        ),
+                    ): vol.In(HISTORY_GRANULARITIES),
                     vol.Required(
                         CONF_IMPORT_STATISTICS,
                         default=self.config_entry.options.get(

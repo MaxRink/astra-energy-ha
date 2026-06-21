@@ -194,7 +194,16 @@ Widget RPC methods observed:
   be redacted from diagnostics and committed docs.
 - `get_mtr_lzs` is the preferred initial Energy Dashboard source. Group
   physical/T1/T2 `kWh` rows as one device and expose total, grid, and
-  solar/object channels as `total_increasing`.
+  solar/object channels as `total_increasing`. Grid import is derived as
+  `total - solar/object` when both channels exist; the observed Astra overview
+  uses that relationship and raw T1 can disagree around meter replacement.
+- `get_mtr_eb` with `s_datum=YYYY-MM-DD` exposes daily 15-minute energy-balance
+  rows. The integration can backfill these as synthesized cumulative
+  `total_increasing` statistics when `history_granularity` is set to
+  `quarter_hour`; recorder import rows are aligned to top-of-hour timestamps
+  because Home Assistant's long-term statistics import API rejects sub-hourly
+  starts. The default remains `monthly` because quarter-hour import requires one
+  API call per day plus monthly anchors.
 - Do not expose Android card values (`_vb_vll`, `_lvb_vll`, `_ez_vll`, etc.) as
   Energy Dashboard totals until live values prove they are cumulative.
 - Use the `recent_refresh_hours` option/service field to re-fetch a recent

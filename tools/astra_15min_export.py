@@ -65,8 +65,7 @@ def _extract_points(path: Path, date_text: str) -> list[dict[str, float | str]]:
     labels = _split_labels(row[LABEL_KEY])
     names = [name.strip() for name in row[TITLE_KEY].split(",")]
     series = {
-        name: values
-        for name, values in zip(names, _split_series(row[SERIES_KEY]), strict=False)
+        name: values for name, values in zip(names, _split_series(row[SERIES_KEY]), strict=False)
     }
     start = datetime.strptime(date_text, "%Y-%m-%d")
     points: list[dict[str, float | str]] = []
@@ -75,8 +74,9 @@ def _extract_points(path: Path, date_text: str) -> list[dict[str, float | str]]:
         if label == "00:00":
             timestamp = start + timedelta(days=1)
         total = _value(series, "Gesamtbezug", index)
-        grid = _value(series, "Netzbezug", index)
         solar = _value(series, "PV-Bezug", index) or _value(series, "Objektbezug", index)
+        raw_grid = _value(series, "Netzbezug", index)
+        grid = max(total - solar, 0.0)
         battery = _value(series, "Batterie-Bezug", index)
         points.append(
             {
@@ -84,10 +84,12 @@ def _extract_points(path: Path, date_text: str) -> list[dict[str, float | str]]:
                 "label": label,
                 "total_kwh": total,
                 "grid_kwh": grid,
+                "raw_grid_kwh": raw_grid,
                 "solar_kwh": solar,
                 "battery_kwh": battery,
                 "total_average_kw": total * 4,
                 "grid_average_kw": grid * 4,
+                "raw_grid_average_kw": raw_grid * 4,
                 "solar_average_kw": solar * 4,
                 "battery_average_kw": battery * 4,
             }
@@ -103,11 +105,7 @@ def _split_series(value: str) -> list[list[float]]:
     series = []
     for part in value.split(";"):
         series.append(
-            [
-                float(item.strip().replace(",", "."))
-                for item in part.split(",")
-                if item.strip()
-            ]
+            [float(item.strip().replace(",", ".")) for item in part.split(",") if item.strip()]
         )
     return series
 
@@ -125,10 +123,12 @@ def _write_csv(path: Path, points: list[dict[str, float | str]]) -> None:
         "label",
         "total_kwh",
         "grid_kwh",
+        "raw_grid_kwh",
         "solar_kwh",
         "battery_kwh",
         "total_average_kw",
         "grid_average_kw",
+        "raw_grid_average_kw",
         "solar_average_kw",
         "battery_average_kw",
     ]
@@ -178,8 +178,8 @@ def _write_svg(
         y = top + (plot_h / 5) * i
         value = max_val - ((max_val - min_val) / 5) * i
         grid.append(
-            f'<line x1="{left}" x2="{width-right}" y1="{y:.1f}" y2="{y:.1f}" stroke="#ddd"/>'
-            f'<text x="{left-10}" y="{y+4:.1f}" text-anchor="end">{value:.2f}</text>'
+            f'<line x1="{left}" x2="{width - right}" y1="{y:.1f}" y2="{y:.1f}" stroke="#ddd"/>'
+            f'<text x="{left - 10}" y="{y + 4:.1f}" text-anchor="end">{value:.2f}</text>'
         )
     paths = []
     legends = []
@@ -201,14 +201,14 @@ def _write_svg(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}">'
         '<rect width="100%" height="100%" fill="white"/>'
-        '<style>text{font-family:Arial,sans-serif;font-size:14px;fill:#222}'
-        '.title{font-size:22px;font-weight:700}</style>'
+        "<style>text{font-family:Arial,sans-serif;font-size:14px;fill:#222}"
+        ".title{font-size:22px;font-weight:700}</style>"
         f'<text class="title" x="{left}" y="32">{title}</text>'
-        f'<text x="{left}" y="{height-48}">{points[0]["timestamp"]} to {points[-1]["timestamp"]}</text>'
-        f'<text x="{left}" y="{top-16}">{unit}</text>'
+        f'<text x="{left}" y="{height - 48}">{points[0]["timestamp"]} to {points[-1]["timestamp"]}</text>'
+        f'<text x="{left}" y="{top - 16}">{unit}</text>'
         + "".join(grid)
-        + f'<line x1="{left}" x2="{width-right}" y1="{height-bottom}" y2="{height-bottom}" stroke="#888"/>'
-        + f'<line x1="{left}" x2="{left}" y1="{top}" y2="{height-bottom}" stroke="#888"/>'
+        + f'<line x1="{left}" x2="{width - right}" y1="{height - bottom}" y2="{height - bottom}" stroke="#888"/>'
+        + f'<line x1="{left}" x2="{left}" y1="{top}" y2="{height - bottom}" stroke="#888"/>'
         + "".join(paths)
         + "".join(legends)
         + "</svg>\n"

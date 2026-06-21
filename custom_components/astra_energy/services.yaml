@@ -14,6 +14,13 @@ backfill_history:
           min: 0
           max: 168
           mode: box
+    history_granularity:
+      required: false
+      selector:
+        select:
+          options:
+            - monthly
+            - quarter_hour
     import_statistics:
       required: false
       selector:

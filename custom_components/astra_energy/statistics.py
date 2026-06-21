@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 
 from homeassistant.const import UnitOfEnergy
@@ -12,11 +12,17 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from .api import AstraMeterReading
-from .const import DOMAIN, ISSUE_BACKFILL_FAILED
+from .const import (
+    HISTORY_GRANULARITY_MONTHLY,
+    HISTORY_GRANULARITY_QUARTER_HOUR,
+    ISSUE_BACKFILL_FAILED,
+)
 from .coordinator import AstraEnergyCoordinator
 from .reporting import async_create_issue, async_delete_issue, summarize_counts
 
 _LOGGER = logging.getLogger(__name__)
+
+RECORDER_SOURCE = "recorder"
 
 STATISTIC_CHANNELS = {
     "imported_energy": ("grid energy", "grid_kwh_total"),
@@ -24,14 +30,28 @@ STATISTIC_CHANNELS = {
     "total_energy": ("total energy", "total_kwh"),
 }
 
+
 def _sensor_statistic_id(reading: AstraMeterReading, channel: str) -> str:
     """Return the entity statistic id used by the energy sensor."""
     return f"sensor.astra_energy_{reading.meter_id}_{channel}"
 
 
-def _statistics_rows(readings: list[AstraMeterReading], value_attr: str) -> list[dict]:
+def _statistics_hour_start(timestamp: datetime) -> datetime:
+    """Return the long-term statistics hour for an interval-end timestamp."""
+    start = timestamp.replace(minute=0, second=0, microsecond=0)
+    if timestamp == start:
+        return start - timedelta(hours=1)
+    return start
+
+
+def _statistics_rows(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    align_to_hour: bool = False,
+) -> list[dict]:
     """Convert cumulative meter readings to recorder statistics rows."""
-    rows = []
+    rows_by_start = {}
     for reading in sorted(
         readings,
         key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
@@ -39,14 +59,14 @@ def _statistics_rows(readings: list[AstraMeterReading], value_attr: str) -> list
         total = getattr(reading, value_attr)
         if reading.timestamp is None or total is None:
             continue
-        rows.append(
-            {
-                "start": dt_util.as_utc(reading.timestamp),
-                "state": total,
-                "sum": total,
-            }
-        )
-    return rows
+        timestamp = dt_util.as_utc(reading.timestamp)
+        start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
+        rows_by_start[start] = {
+            "start": start,
+            "state": total,
+            "sum": total,
+        }
+    return list(rows_by_start.values())
 
 
 async def async_backfill_statistics(
@@ -55,6 +75,7 @@ async def async_backfill_statistics(
     *,
     days: int,
     recent_refresh_hours: int,
+    history_granularity: str,
     import_statistics: bool,
 ) -> dict[str, int]:
     """Fetch historical readings and optionally import long-term statistics."""
@@ -67,14 +88,22 @@ async def async_backfill_statistics(
     if recent_refresh_hours > 0:
         start_candidates.append(end - timedelta(hours=recent_refresh_hours))
     start = min(start_candidates)
-    readings = await coordinator.client.async_get_historical_meter_stands(start, end)
+    if history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR:
+        readings = await coordinator.client.async_get_historical_interval_meter_stands(
+            start,
+            end,
+        )
+    else:
+        history_granularity = HISTORY_GRANULARITY_MONTHLY
+        readings = await coordinator.client.async_get_historical_meter_stands(start, end)
     grouped: dict[str, list[AstraMeterReading]] = {}
     for reading in readings:
         grouped.setdefault(reading.meter_id, []).append(reading)
 
     if not import_statistics:
         _LOGGER.info(
-            "Fetched Astra historical readings; statistics import disabled: %s",
+            "Fetched Astra %s historical readings; statistics import disabled: %s",
+            history_granularity,
             summarize_counts({meter_id: len(rows) for meter_id, rows in grouped.items()}),
         )
         await async_delete_issue(hass, ISSUE_BACKFILL_FAILED)
@@ -108,14 +137,18 @@ async def async_backfill_statistics(
                 has_sum=True,
                 mean_type=StatisticMeanType.NONE,
                 name=f"Astra Energy {name} {label}",
-                source=DOMAIN,
+                source=RECORDER_SOURCE,
                 statistic_id=statistic_id,
                 unit_class=EnergyConverter.UNIT_CLASS,
                 unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
             )
             rows = [
                 StatisticData(start=row["start"], state=row["state"], sum=row["sum"])
-                for row in _statistics_rows(meter_readings, value_attr)
+                for row in _statistics_rows(
+                    meter_readings,
+                    value_attr,
+                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                )
             ]
             if rows:
                 try:
