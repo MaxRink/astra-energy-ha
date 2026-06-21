@@ -277,6 +277,54 @@ def test_daily_interval_values_derive_grid_from_total_minus_solar() -> None:
     assert points[0]["timestamp"] == dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC)
 
 
+def test_overview_metrics_derive_grid_and_keep_raw_grid() -> None:
+    metrics = astra_api._overview_metrics_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {"v01": "str_mtr_vbo_vb_strom_gesbez", "v02": "2432.418", "v03": "kWh"},
+                {"v01": "str_mtr_vbo_vb_strom_t1", "v02": "1605.326", "v03": "kWh"},
+                {"v01": "str_mtr_vbo_strom_t2", "v02": "286.016", "v03": "kWh"},
+                {"v01": "str_mtr_vbo_vmco_strom_pv", "v02": "0.161", "v03": "t"},
+                {"v01": "str_mtr_vbo_autarkiegrad", "v02": "11.759", "v03": "%"},
+            ],
+        }
+    )
+
+    assert metrics["current_year_total_kwh"] == 2432.418
+    assert metrics["current_year_raw_grid_kwh"] == 1605.326
+    assert metrics["current_year_solar_kwh"] == 286.016
+    assert metrics["current_year_grid_kwh"] == 2146.402
+    assert metrics["pv_co2_savings_t"] == 0.161
+    assert metrics["autarky_percent"] == 11.759
+
+
+def test_monthly_metrics_derive_grid_from_total_minus_solar() -> None:
+    metrics = astra_api._monthly_metrics_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "_hvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                    "_hvb_vll": (
+                        "423.591,406.371;"
+                        "402.801,376.63;"
+                        "20.79,29.741;"
+                        "0,0;"
+                        "0,0"
+                    ),
+                }
+            ],
+        },
+        0,
+    )
+
+    assert metrics["current_month_total_kwh"] == 423.591
+    assert metrics["current_month_raw_grid_kwh"] == 402.801
+    assert metrics["current_month_solar_kwh"] == 20.79
+    assert metrics["current_month_grid_kwh"] == 402.801
+
+
 def test_interval_point_reading_uses_cumulative_totals() -> None:
     reading = astra_api._reading_from_interval_point(
         {
@@ -346,6 +394,31 @@ def test_statistics_rows_align_interval_end_timestamps_to_hour() -> None:
             "start": dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
             "state": 104.0,
             "sum": 104.0,
+        }
+    ]
+
+
+def test_statistics_rows_apply_sum_offset_without_changing_state() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=4784.3,
+                grid_kwh_total=4784.3,
+            )
+        ],
+        "grid_kwh_total",
+        sum_offset=4774.064,
+    )
+
+    assert rows == [
+        {
+            "start": dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC),
+            "state": 4784.3,
+            "sum": 10.235999999999876,
         }
     ]
 

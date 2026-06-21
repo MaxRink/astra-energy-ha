@@ -20,7 +20,10 @@
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
           "history_granularity": "History granularity",
-          "import_statistics": "Import historical long-term statistics"
+          "import_statistics": "Import historical long-term statistics",
+          "grid_price_net": "Grid price before tax in EUR/kWh",
+          "solar_price_net": "Solar price before tax in EUR/kWh",
+          "tax_rate": "Tax rate"
         },
         "data_description": {
           "username": "Astra Cockpit username.",
@@ -30,7 +33,10 @@
           "backfill_days": "How many days to fetch when running the backfill action.",
           "recent_refresh_hours": "How many recent hours to re-fetch when running the backfill action.",
           "history_granularity": "Use monthly meter stands for efficient imports or quarter-hour energy balance rows for detailed Energy Dashboard history.",
-          "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics."
+          "import_statistics": "When enabled for the backfill action, write fetched historical readings into recorder long-term statistics.",
+          "grid_price_net": "Astra reports prices before German VAT. The price entity exposes the gross value.",
+          "solar_price_net": "Astra reports prices before German VAT. The price entity exposes the gross value.",
+          "tax_rate": "Tax rate as a decimal fraction, for example 0.19 for 19%."
         }
       },
       "reauth_confirm": {
@@ -52,7 +58,10 @@
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
           "history_granularity": "History granularity",
-          "import_statistics": "Import historical long-term statistics"
+          "import_statistics": "Import historical long-term statistics",
+          "grid_price_net": "Grid price before tax in EUR/kWh",
+          "solar_price_net": "Solar price before tax in EUR/kWh",
+          "tax_rate": "Tax rate"
         }
       }
     }
@@ -66,7 +75,10 @@
           "backfill_days": "Backfill days",
           "recent_refresh_hours": "Recent refresh hours",
           "history_granularity": "History granularity",
-          "import_statistics": "Import historical long-term statistics"
+          "import_statistics": "Import historical long-term statistics",
+          "grid_price_net": "Grid price before tax in EUR/kWh",
+          "solar_price_net": "Solar price before tax in EUR/kWh",
+          "tax_rate": "Tax rate"
         }
       }
     }
@@ -133,6 +145,63 @@
       },
       "exported_energy": {
         "name": "Exported energy"
+      },
+      "raw_grid_energy": {
+        "name": "Raw grid meter energy"
+      },
+      "grid_price": {
+        "name": "Grid energy price"
+      },
+      "solar_price": {
+        "name": "Solar energy price"
+      },
+      "current_month_grid_energy": {
+        "name": "Current month grid energy"
+      },
+      "current_month_solar_energy": {
+        "name": "Current month solar energy"
+      },
+      "current_month_total_energy": {
+        "name": "Current month total energy"
+      },
+      "current_month_grid_cost": {
+        "name": "Current month grid cost"
+      },
+      "current_month_solar_cost": {
+        "name": "Current month solar cost"
+      },
+      "current_month_total_cost": {
+        "name": "Current month total cost"
+      },
+      "current_year_grid_energy": {
+        "name": "Current year grid energy"
+      },
+      "current_year_solar_energy": {
+        "name": "Current year solar energy"
+      },
+      "current_year_total_energy": {
+        "name": "Current year total energy"
+      },
+      "current_year_raw_grid_energy": {
+        "name": "Current year raw grid energy"
+      },
+      "current_year_grid_cost": {
+        "name": "Current year grid cost"
+      },
+      "current_year_solar_cost": {
+        "name": "Current year solar cost"
+      },
+      "current_year_total_cost": {
+        "name": "Current year total cost"
+      },
+      "autarky": {
+        "name": "Autarky"
+      },
+      "pv_co2_savings": {
+        "name": "PV CO2 savings"
+      },
+      "tax_rate": {
+        "name": "Energy tax rate"
       }
     }
   }

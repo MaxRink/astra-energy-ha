@@ -41,7 +41,18 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
                         "grid": reading.grid_kwh_total,
                         "solar": reading.solar_kwh_total,
                         "total": reading.total_kwh,
+                        "raw_grid": reading.raw_grid_kwh_total,
                         "exported": reading.exported_kwh_total,
+                        "grid_price": reading.grid_price_gross_eur_per_kwh,
+                        "solar_price": reading.solar_price_gross_eur_per_kwh,
+                        "current_month_grid": reading.current_month_grid_kwh,
+                        "current_month_solar": reading.current_month_solar_kwh,
+                        "current_month_total": reading.current_month_total_kwh,
+                        "current_year_grid": reading.current_year_grid_kwh,
+                        "current_year_solar": reading.current_year_solar_kwh,
+                        "current_year_total": reading.current_year_total_kwh,
+                        "autarky": reading.autarky_percent,
+                        "pv_co2_savings": reading.pv_co2_savings_t,
                     }.items()
                     if value is not None
                 ],

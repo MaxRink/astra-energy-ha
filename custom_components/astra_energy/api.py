@@ -10,7 +10,12 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from .const import DAILY_INTERVAL_CONCURRENCY
+from .const import (
+    DAILY_INTERVAL_CONCURRENCY,
+    DEFAULT_GRID_PRICE_NET,
+    DEFAULT_SOLAR_PRICE_NET,
+    DEFAULT_TAX_RATE,
+)
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -44,9 +49,31 @@ class AstraMeterReading:
     grid_kwh_total: float | None = None
     solar_kwh_total: float | None = None
     total_kwh: float | None = None
+    raw_grid_kwh_total: float | None = None
     exported_kwh_total: float | None = None
     cost_total: float | None = None
     currency: str | None = None
+    grid_price_net_eur_per_kwh: float | None = None
+    grid_price_gross_eur_per_kwh: float | None = None
+    solar_price_net_eur_per_kwh: float | None = None
+    solar_price_gross_eur_per_kwh: float | None = None
+    tax_rate: float | None = None
+    current_month_grid_kwh: float | None = None
+    current_month_solar_kwh: float | None = None
+    current_month_total_kwh: float | None = None
+    current_month_raw_grid_kwh: float | None = None
+    current_month_grid_cost_gross_eur: float | None = None
+    current_month_solar_cost_gross_eur: float | None = None
+    current_month_total_cost_gross_eur: float | None = None
+    current_year_grid_kwh: float | None = None
+    current_year_solar_kwh: float | None = None
+    current_year_total_kwh: float | None = None
+    current_year_raw_grid_kwh: float | None = None
+    current_year_grid_cost_gross_eur: float | None = None
+    current_year_solar_cost_gross_eur: float | None = None
+    current_year_total_cost_gross_eur: float | None = None
+    autarky_percent: float | None = None
+    pv_co2_savings_t: float | None = None
     raw_meter_id: str | None = None
     legacy_meter_id: str | None = None
     raw: dict[str, Any] | None = None
@@ -82,6 +109,18 @@ def _session_id(username: str, password: str) -> str:
 def _total_or_zero(value: float | None) -> float:
     """Return a cumulative meter value or zero when Astra omitted it."""
     return value if value is not None else 0.0
+
+
+def _round_or_none(value: float | None, digits: int = 6) -> float | None:
+    """Round a numeric value while preserving missing data."""
+    return round(value, digits) if value is not None else None
+
+
+def _cost_gross(kwh: float | None, price_gross: float | None) -> float | None:
+    """Return gross cost for an energy amount and price."""
+    if kwh is None or price_gross is None:
+        return None
+    return round(kwh * price_gross, 4)
 
 
 def _parse_number(value: Any) -> float | None:
@@ -264,6 +303,7 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
         grid_kwh_total=grid_total,
         solar_kwh_total=solar_total,
         total_kwh=total_kwh,
+        raw_grid_kwh_total=raw_grid_total,
         raw_meter_id=raw_meter_id,
         legacy_meter_id=legacy_meter_id,
         raw={
@@ -404,6 +444,76 @@ def _daily_interval_values_from_payload(data: dict[str, Any], day: date) -> list
     return points
 
 
+def _overview_metrics_from_payload(data: dict[str, Any]) -> dict[str, float]:
+    """Extract current-year overview metrics from Astra's overview payload."""
+    metrics: dict[str, float] = {}
+    for row in data.get("data") or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("v01") or "").casefold()
+        value = _parse_number(row.get("v02"))
+        if value is None:
+            continue
+        if key == "str_mtr_vbo_vb_strom_gesbez":
+            metrics["current_year_total_kwh"] = value
+        elif key == "str_mtr_vbo_vb_strom_t1":
+            metrics["current_year_raw_grid_kwh"] = value
+        elif key in {"str_mtr_vbo_strom_t2", "str_mtr_vbo_vb_strom_pv"}:
+            metrics["current_year_solar_kwh"] = value
+        elif key == "str_mtr_vbo_vmco_strom_pv":
+            metrics["pv_co2_savings_t"] = value
+        elif key == "str_mtr_vbo_autarkiegrad":
+            metrics["autarky_percent"] = value
+
+    total = metrics.get("current_year_total_kwh")
+    solar = metrics.get("current_year_solar_kwh")
+    if total is not None and solar is not None:
+        metrics["current_year_grid_kwh"] = max(total - solar, 0.0)
+    elif metrics.get("current_year_raw_grid_kwh") is not None:
+        metrics["current_year_grid_kwh"] = metrics["current_year_raw_grid_kwh"]
+    return metrics
+
+
+def _monthly_metrics_from_payload(data: dict[str, Any], month_index: int) -> dict[str, float]:
+    """Extract current-month metrics from Astra's monthly medium payload."""
+    metrics: dict[str, float] = {}
+    rows = data.get("data") or []
+    if not rows or not isinstance(rows[0], dict):
+        return metrics
+    row = rows[0]
+    titles = _split_csv_text(row.get("_hvb_ttl") or row.get("_vb_ttl"))
+    values = _split_15m_series(row.get("_hvb_vll") or row.get("_vb_vll"))
+    if not titles or not values:
+        return metrics
+    series = {
+        title.casefold(): numbers for title, numbers in zip(titles, values, strict=False)
+    }
+
+    def value(name: str) -> float | None:
+        numbers = series.get(name.casefold())
+        if not numbers or month_index >= len(numbers):
+            return None
+        return numbers[month_index]
+
+    total = value("Gesamtbezug")
+    raw_grid = value("Netzbezug")
+    solar = value("Objektbezug")
+    pv = value("PV-Bezug")
+    if solar is None or (solar == 0 and pv is not None):
+        solar = pv
+    if total is not None:
+        metrics["current_month_total_kwh"] = total
+    if raw_grid is not None:
+        metrics["current_month_raw_grid_kwh"] = raw_grid
+    if solar is not None:
+        metrics["current_month_solar_kwh"] = solar
+    if total is not None and solar is not None:
+        metrics["current_month_grid_kwh"] = max(total - solar, 0.0)
+    elif raw_grid is not None:
+        metrics["current_month_grid_kwh"] = raw_grid
+    return metrics
+
+
 class AstraClient:
     """Small async client for Astra energy data."""
 
@@ -414,6 +524,9 @@ class AstraClient:
         username: str,
         password: str,
         base_url: str,
+        grid_price_net: float = DEFAULT_GRID_PRICE_NET,
+        solar_price_net: float = DEFAULT_SOLAR_PRICE_NET,
+        tax_rate: float = DEFAULT_TAX_RATE,
     ) -> None:
         self._session = session
         self._username = username
@@ -428,6 +541,9 @@ class AstraClient:
         self._medium = "1"
         self._language = "de"
         self._last_login_payload: dict[str, Any] = {}
+        self._grid_price_net = float(grid_price_net)
+        self._solar_price_net = float(solar_price_net)
+        self._tax_rate = float(tax_rate)
 
     async def _post_action(self, action: str, **params: str) -> str:
         """POST one Android API action and verify Astra's MD5 response suffix."""
@@ -540,6 +656,8 @@ class AstraClient:
         readings = await self._read_latest_meter_stands()
         if readings:
             balance_values = await self._read_energy_balance_values()
+            overview_values = await self._read_overview_metrics()
+            monthly_values = await self._read_monthly_metrics()
             if balance_values:
                 first = readings[0]
                 readings[0] = replace(
@@ -554,8 +672,86 @@ class AstraClient:
                         },
                     },
                 )
+            readings[0] = self._reading_with_metrics(
+                readings[0],
+                overview_values=overview_values,
+                monthly_values=monthly_values,
+            )
             return readings
-        return await self._read_overview_values()
+        return [
+            self._reading_with_metrics(reading)
+            for reading in await self._read_overview_values()
+        ]
+
+    def _reading_with_metrics(
+        self,
+        reading: AstraMeterReading,
+        *,
+        overview_values: dict[str, float] | None = None,
+        monthly_values: dict[str, float] | None = None,
+    ) -> AstraMeterReading:
+        """Attach tariff, current-year, and current-month metrics to a reading."""
+        overview_values = overview_values or {}
+        monthly_values = monthly_values or {}
+        grid_price_gross = _round_or_none(self._grid_price_net * (1 + self._tax_rate))
+        solar_price_gross = _round_or_none(self._solar_price_net * (1 + self._tax_rate))
+        current_month_grid = monthly_values.get("current_month_grid_kwh")
+        current_month_solar = monthly_values.get("current_month_solar_kwh")
+        current_year_grid = overview_values.get("current_year_grid_kwh")
+        current_year_solar = overview_values.get("current_year_solar_kwh")
+        return replace(
+            reading,
+            grid_price_net_eur_per_kwh=self._grid_price_net,
+            grid_price_gross_eur_per_kwh=grid_price_gross,
+            solar_price_net_eur_per_kwh=self._solar_price_net,
+            solar_price_gross_eur_per_kwh=solar_price_gross,
+            tax_rate=self._tax_rate,
+            current_month_grid_kwh=current_month_grid,
+            current_month_solar_kwh=current_month_solar,
+            current_month_total_kwh=monthly_values.get("current_month_total_kwh"),
+            current_month_raw_grid_kwh=monthly_values.get("current_month_raw_grid_kwh"),
+            current_month_grid_cost_gross_eur=_cost_gross(
+                current_month_grid, grid_price_gross
+            ),
+            current_month_solar_cost_gross_eur=_cost_gross(
+                current_month_solar, solar_price_gross
+            ),
+            current_month_total_cost_gross_eur=_round_or_none(
+                (_cost_gross(current_month_grid, grid_price_gross) or 0.0)
+                + (_cost_gross(current_month_solar, solar_price_gross) or 0.0),
+                4,
+            )
+            if current_month_grid is not None or current_month_solar is not None
+            else None,
+            current_year_grid_kwh=current_year_grid,
+            current_year_solar_kwh=current_year_solar,
+            current_year_total_kwh=overview_values.get("current_year_total_kwh"),
+            current_year_raw_grid_kwh=overview_values.get("current_year_raw_grid_kwh"),
+            current_year_grid_cost_gross_eur=_cost_gross(current_year_grid, grid_price_gross),
+            current_year_solar_cost_gross_eur=_cost_gross(
+                current_year_solar, solar_price_gross
+            ),
+            current_year_total_cost_gross_eur=_round_or_none(
+                (_cost_gross(current_year_grid, grid_price_gross) or 0.0)
+                + (_cost_gross(current_year_solar, solar_price_gross) or 0.0),
+                4,
+            )
+            if current_year_grid is not None or current_year_solar is not None
+            else None,
+            autarky_percent=overview_values.get("autarky_percent"),
+            pv_co2_savings_t=overview_values.get("pv_co2_savings_t"),
+            raw={
+                **(reading.raw or {}),
+                "overview": overview_values,
+                "monthly": monthly_values,
+                "tariff": {
+                    "grid_price_net_eur_per_kwh": self._grid_price_net,
+                    "solar_price_net_eur_per_kwh": self._solar_price_net,
+                    "tax_rate": self._tax_rate,
+                    "source": "configured_observed_astra_tariff",
+                },
+            },
+        )
 
     async def async_get_history(
         self,
@@ -709,6 +905,28 @@ class AstraClient:
         except AstraApiError:
             return {}
         return _energy_balance_values_from_payload(data)
+
+    async def _read_overview_metrics(self) -> dict[str, float]:
+        """Read current-year overview metrics from Astra."""
+        try:
+            data = await self._get_json("get_mtr_vb_overview")
+        except AstraApiError:
+            return {}
+        return _overview_metrics_from_payload(data)
+
+    async def _read_monthly_metrics(self) -> dict[str, float]:
+        """Read current-month medium metrics from Astra."""
+        today = datetime.now(UTC).date()
+        try:
+            data = await self._get_json(
+                "get_mtr_vbmed",
+                s_year=str(today.year),
+                s_mnt="-1",
+                s_datum="-1",
+            )
+        except AstraApiError:
+            return {}
+        return _monthly_metrics_from_payload(data, today.month - 1)
 
     async def _read_overview_values(self) -> list[AstraMeterReading]:
         """Fallback to tenant overview values when no meter stand is exposed."""

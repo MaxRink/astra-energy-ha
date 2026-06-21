@@ -77,6 +77,156 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         entity_registry_enabled_default=False,
     ),
+    AstraSensorEntityDescription(
+        key="raw_grid_energy",
+        translation_key="raw_grid_energy",
+        value_attr="raw_grid_kwh_total",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="grid_price",
+        translation_key="grid_price",
+        value_attr="grid_price_gross_eur_per_kwh",
+        native_unit_of_measurement="EUR/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=5,
+    ),
+    AstraSensorEntityDescription(
+        key="solar_price",
+        translation_key="solar_price",
+        value_attr="solar_price_gross_eur_per_kwh",
+        native_unit_of_measurement="EUR/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=5,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_grid_energy",
+        translation_key="current_month_grid_energy",
+        value_attr="current_month_grid_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_solar_energy",
+        translation_key="current_month_solar_energy",
+        value_attr="current_month_solar_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_total_energy",
+        translation_key="current_month_total_energy",
+        value_attr="current_month_total_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_grid_cost",
+        translation_key="current_month_grid_cost",
+        value_attr="current_month_grid_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_solar_cost",
+        translation_key="current_month_solar_cost",
+        value_attr="current_month_solar_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_month_total_cost",
+        translation_key="current_month_total_cost",
+        value_attr="current_month_total_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_grid_energy",
+        translation_key="current_year_grid_energy",
+        value_attr="current_year_grid_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_solar_energy",
+        translation_key="current_year_solar_energy",
+        value_attr="current_year_solar_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_total_energy",
+        translation_key="current_year_total_energy",
+        value_attr="current_year_total_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_raw_grid_energy",
+        translation_key="current_year_raw_grid_energy",
+        value_attr="current_year_raw_grid_kwh",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_grid_cost",
+        translation_key="current_year_grid_cost",
+        value_attr="current_year_grid_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_solar_cost",
+        translation_key="current_year_solar_cost",
+        value_attr="current_year_solar_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="current_year_total_cost",
+        translation_key="current_year_total_cost",
+        value_attr="current_year_total_cost_gross_eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    AstraSensorEntityDescription(
+        key="autarky",
+        translation_key="autarky",
+        value_attr="autarky_percent",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AstraSensorEntityDescription(
+        key="pv_co2_savings",
+        translation_key="pv_co2_savings",
+        value_attr="pv_co2_savings_t",
+        native_unit_of_measurement="t",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    AstraSensorEntityDescription(
+        key="tax_rate",
+        translation_key="tax_rate",
+        value_attr="tax_rate",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
 )
 
 
@@ -137,7 +287,10 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
         reading = self.reading
         if reading is None:
             return None
-        return getattr(reading, self.entity_description.value_attr)
+        value = getattr(reading, self.entity_description.value_attr)
+        if self.entity_description.key == "tax_rate" and value is not None:
+            return value * 100
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, str | None]:
@@ -145,13 +298,24 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
         reading = self.reading
         if reading is None:
             return {ATTR_METER_ID: self._meter_id, ATTR_SOURCE: DOMAIN}
-        return {
+        attributes = {
             ATTR_METER_ID: reading.meter_id,
             ATTR_RAW_METER_ID: reading.raw_meter_id,
             ATTR_LEGACY_METER_ID: reading.legacy_meter_id,
             ATTR_LAST_PROVIDER_UPDATE: reading.timestamp.isoformat() if reading.timestamp else None,
             ATTR_SOURCE: DOMAIN,
         }
+        if self.entity_description.key in {"grid_price", "solar_price", "tax_rate"}:
+            attributes.update(
+                {
+                    "grid_price_net_eur_per_kwh": reading.grid_price_net_eur_per_kwh,
+                    "solar_price_net_eur_per_kwh": reading.solar_price_net_eur_per_kwh,
+                    "tax_rate": reading.tax_rate,
+                    "price_includes_tax": self.entity_description.key != "tax_rate",
+                    "price_source": "configured_observed_astra_tariff",
+                }
+            )
+        return attributes
 
     @property
     def device_info(self):

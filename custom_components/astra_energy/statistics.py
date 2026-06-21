@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from typing import Any
 
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
@@ -52,6 +53,7 @@ def _statistics_rows(
     value_attr: str,
     *,
     align_to_hour: bool = False,
+    sum_offset: float = 0.0,
 ) -> list[dict]:
     """Convert cumulative meter readings to recorder statistics rows."""
     rows_by_start = {}
@@ -67,9 +69,53 @@ def _statistics_rows(
         rows_by_start[start] = {
             "start": start,
             "state": total,
-            "sum": total,
+            "sum": total - sum_offset,
         }
     return list(rows_by_start.values())
+
+
+def _latest_sum_offset(
+    hass: HomeAssistant,
+    statistic_id: str,
+    start: datetime,
+    end: datetime,
+) -> float:
+    """Return the recorder sum offset for an existing total_increasing statistic."""
+    try:
+        from homeassistant.components.recorder.statistics import statistics_during_period
+    except ImportError:
+        return 0.0
+    rows: list[dict[str, Any]] = statistics_during_period(
+        hass,
+        start,
+        end,
+        {statistic_id},
+        "hour",
+        None,
+        {"state", "sum"},
+    ).get(statistic_id, [])
+    for row in reversed(rows):
+        state = row.get("state")
+        total = row.get("sum")
+        if state is not None and total is not None:
+            return state - total
+    return 0.0
+
+
+async def _async_sum_offsets(
+    hass: HomeAssistant,
+    statistic_ids: set[str],
+    end: datetime,
+) -> dict[str, float]:
+    """Return recorder sum offsets for existing statistics."""
+    start = end - timedelta(days=7)
+    offsets = await hass.async_add_executor_job(
+        lambda: {
+            statistic_id: _latest_sum_offset(hass, statistic_id, start, end)
+            for statistic_id in statistic_ids
+        }
+    )
+    return {statistic_id: offset for statistic_id, offset in offsets.items() if offset}
 
 
 async def async_backfill_statistics(
@@ -130,6 +176,14 @@ async def async_backfill_statistics(
         )
         raise HomeAssistantError("Recorder statistics API is not available") from err
 
+    statistic_ids = {
+        _sensor_statistic_id(meter_readings[-1], channel)
+        for meter_readings in grouped.values()
+        if meter_readings
+        for channel in STATISTIC_CHANNELS
+    }
+    sum_offsets = await _async_sum_offsets(hass, statistic_ids, end)
+
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
             continue
@@ -150,6 +204,7 @@ async def async_backfill_statistics(
                     meter_readings,
                     value_attr,
                     align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                    sum_offset=sum_offsets.get(statistic_id, 0.0),
                 )
             ]
             if rows:

@@ -11,7 +11,17 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import AstraApiError, AstraAuthError, AstraClient, AstraMeterReading
-from .const import DOMAIN, ISSUE_API_AUTH, ISSUE_API_UNAVAILABLE
+from .const import (
+    CONF_GRID_PRICE_NET,
+    CONF_SOLAR_PRICE_NET,
+    CONF_TAX_RATE,
+    DEFAULT_GRID_PRICE_NET,
+    DEFAULT_SOLAR_PRICE_NET,
+    DEFAULT_TAX_RATE,
+    DOMAIN,
+    ISSUE_API_AUTH,
+    ISSUE_API_UNAVAILABLE,
+)
 from .reporting import async_create_issue, async_delete_issue, error_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +52,9 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             username=username,
             password=password,
             base_url=base_url,
+            grid_price_net=entry.options.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
+            solar_price_net=entry.options.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
+            tax_rate=entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
         )
         self.last_error: dict[str, str] | None = None
 

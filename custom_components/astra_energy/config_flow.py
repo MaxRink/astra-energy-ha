@@ -15,21 +15,31 @@ from .api import AstraApiError, AstraAuthError, AstraClient
 from .const import (
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
+    CONF_GRID_PRICE_NET,
     CONF_HISTORY_GRANULARITY,
     CONF_IMPORT_STATISTICS,
     CONF_POLL_INTERVAL,
     CONF_RECENT_REFRESH_HOURS,
+    CONF_SOLAR_PRICE_NET,
+    CONF_TAX_RATE,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
+    DEFAULT_GRID_PRICE_NET,
     DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECENT_REFRESH_HOURS,
+    DEFAULT_SOLAR_PRICE_NET,
+    DEFAULT_TAX_RATE,
     DOMAIN,
     HISTORY_GRANULARITIES,
     MAX_BACKFILL_DAYS,
+    MAX_PRICE_NET,
     MAX_RECENT_REFRESH_HOURS,
+    MAX_TAX_RATE,
+    MIN_PRICE_NET,
     MIN_POLL_INTERVAL,
+    MIN_TAX_RATE,
 )
 
 
@@ -88,6 +98,18 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_IMPORT_STATISTICS,
                 default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
             ): bool,
+            vol.Required(
+                CONF_GRID_PRICE_NET,
+                default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
+            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+            vol.Required(
+                CONF_SOLAR_PRICE_NET,
+                default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
+            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+            vol.Required(
+                CONF_TAX_RATE,
+                default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
+            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_TAX_RATE, max=MAX_TAX_RATE)),
         }
     )
 
@@ -129,6 +151,9 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
                         CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
+                        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
+                        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
+                        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
                     },
                 )
 
@@ -208,6 +233,9 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
                         CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
                         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
+                        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
+                        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
+                        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
                     },
                 )
         return self.async_show_form(
@@ -272,6 +300,22 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
                             CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS
                         ),
                     ): bool,
+                    vol.Required(
+                        CONF_GRID_PRICE_NET,
+                        default=self._config_entry.options.get(
+                            CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET
+                        ),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+                    vol.Required(
+                        CONF_SOLAR_PRICE_NET,
+                        default=self._config_entry.options.get(
+                            CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET
+                        ),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+                    vol.Required(
+                        CONF_TAX_RATE,
+                        default=self._config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_TAX_RATE, max=MAX_TAX_RATE)),
                 }
             ),
         )
