@@ -10,7 +10,6 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import selector
 
 from .api import AstraApiError, AstraAuthError, AstraClient
 from .const import (
@@ -82,18 +81,17 @@ def _number_box(
     max_value: float | None = None,
     step: float | None = None,
     unit: str | None = None,
-) -> selector.NumberSelector:
-    """Return a box-mode number selector so the UI shows the actual value."""
-    config: dict[str, Any] = {"mode": selector.NumberSelectorMode.BOX}
+) -> vol.All:
+    """Return a plain numeric validator for config flows."""
+    validators: list[Any] = [vol.Coerce(float)]
+    range_config: dict[str, float] = {}
     if min_value is not None:
-        config["min"] = min_value
+        range_config["min"] = min_value
     if max_value is not None:
-        config["max"] = max_value
-    if step is not None:
-        config["step"] = step
-    if unit is not None:
-        config["unit_of_measurement"] = unit
-    return selector.NumberSelector(selector.NumberSelectorConfig(**config))
+        range_config["max"] = max_value
+    if range_config:
+        validators.append(vol.Range(**range_config))
+    return vol.All(*validators)
 
 
 async def _async_validate_input(hass, user_input: dict[str, Any]) -> None:
