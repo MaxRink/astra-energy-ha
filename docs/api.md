@@ -101,6 +101,14 @@ Login/session id:
   `_lvb_ttl`. For one row, average kW is `interval_kWh * 4`.
 - Observed 2026-06-19 totals from this endpoint: total 34.966 kWh, grid
   19.399199 kWh, solar/object 16.690709 kWh, battery 0 kWh.
+- The same payload exposes PV delivery/generation card series:
+  - `_lez_ttl`: `PV-Gesamtlieferung,PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung`.
+  - `_ez_ttl`: `PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung`.
+  - `_vbt2r_ttl` and `_lt2rvb_ttl`: tariff split variants for
+    `Netzbezug,Objektbezug` and `Gesamtbezug,Netzbezug,Objektbezug`.
+- No local capture currently contains a confirmed `Gemeinstrom` /
+  shared-electricity label. If the provider adds it, it should be treated as a
+  separate channel only after the series semantics are verified against the UI.
 
 `get_verbrauch`:
 
@@ -203,7 +211,8 @@ Widget RPC methods observed:
   `quarter_hour`; recorder import rows are aligned to top-of-hour timestamps
   because Home Assistant's long-term statistics import API rejects sub-hourly
   starts. The default remains `monthly` because quarter-hour import requires one
-  API call per day plus monthly anchors.
+  slow API call per day. Use the action's `run_in_background` field for long
+  imports.
 - Do not expose Android card values (`_vb_vll`, `_lvb_vll`, `_ez_vll`, etc.) as
   Energy Dashboard totals until live values prove they are cumulative.
 - Use the `recent_refresh_hours` option/service field to re-fetch a recent

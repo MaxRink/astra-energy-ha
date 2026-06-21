@@ -243,6 +243,30 @@ components:
               _lvb_eh:
                 type: string
                 example: kWh
+              _lez_ttl:
+                type: string
+                description: PV delivery series labels, e.g. PV-Gesamtlieferung,PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung.
+              _lez_vll:
+                type: string
+                description: Semicolon-separated monthly PV delivery values matching `_lez_ttl`.
+              _ez_ttl:
+                type: string
+                description: PV feed/battery/object delivery labels.
+              _ez_vll:
+                type: string
+                description: Semicolon-separated monthly PV feed/battery/object delivery values.
+              _vbt2r_ttl:
+                type: string
+                description: Tariff split labels, e.g. Netzbezug,Objektbezug.
+              _vbt2r_vll:
+                type: string
+                description: Semicolon-separated tariff split values matching `_vbt2r_ttl`.
+              _lt2rvb_ttl:
+                type: string
+                description: Tariff split labels, e.g. Gesamtbezug,Netzbezug,Objektbezug.
+              _lt2rvb_vll:
+                type: string
+                description: Semicolon-separated tariff split values matching `_lt2rvb_ttl`.
         v06:
           type: string
           description: Medium.

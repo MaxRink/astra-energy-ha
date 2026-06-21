@@ -114,11 +114,12 @@ row-count summary to Home Assistant service callers and creates repair issues
 plus persistent notifications when API updates or statistics imports fail.
 Set `history_granularity` to `quarter_hour` to import Astra's 15-minute
 energy-balance rows; the default `monthly` mode uses the cheaper monthly meter
-stands. Quarter-hour import expands the requested start to the first day of that
-month so synthesized cumulative totals stay monotonic. Home Assistant long-term
-statistics imports must use top-of-hour timestamps, so the Energy Dashboard
-import stores hourly rows selected from the 15-minute source data; the local CSV
-export tool keeps the full 15-minute resolution for inspection.
+stands. Quarter-hour imports call one provider endpoint per day and can be slow;
+set `run_in_background` for long backfills behind reverse proxies. Home
+Assistant long-term statistics imports must use top-of-hour timestamps, so the
+Energy Dashboard import stores hourly rows selected from the 15-minute source
+data; the local CSV export tool keeps the full 15-minute resolution for
+inspection.
 
 Quality-scale tracking is in `docs/quality-scale.md`.
 

@@ -8,12 +8,20 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import types
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_PATH = REPO_ROOT / "custom_components" / "astra_energy" / "api.py"
 
-spec = importlib.util.spec_from_file_location("astra_energy_api_for_analysis", API_PATH)
+custom_components_pkg = types.ModuleType("custom_components")
+custom_components_pkg.__path__ = []
+astra_pkg = types.ModuleType("custom_components.astra_energy")
+astra_pkg.__path__ = [str(API_PATH.parent)]
+sys.modules.setdefault("custom_components", custom_components_pkg)
+sys.modules.setdefault("custom_components.astra_energy", astra_pkg)
+
+spec = importlib.util.spec_from_file_location("custom_components.astra_energy.api", API_PATH)
 if not spec or not spec.loader:
     raise RuntimeError(f"Could not load Astra API module from {API_PATH}")
 astra_api = importlib.util.module_from_spec(spec)
@@ -72,18 +80,13 @@ def analyze_capture(path: Path, *, show_ids: bool) -> None:
         for label in ("Gesamtbezug", "Netzbezug", "Objektbezug"):
             values = balance.get(label)
             if values:
-                print(
-                    f"  {label}: {_fmt(sum(values))} kWh "
-                    f"over {_covered_months(values)} month(s)"
-                )
+                print(f"  {label}: {_fmt(sum(values))} kWh over {_covered_months(values)} month(s)")
         total = sum(balance.get("Gesamtbezug") or [])
         grid = sum(balance.get("Netzbezug") or [])
         solar = sum(balance.get("Objektbezug") or [])
         if total:
             print(
-                "  split: "
-                f"grid={grid / total * 100:.1f}%, "
-                f"solar_object={solar / total * 100:.1f}%"
+                f"  split: grid={grid / total * 100:.1f}%, solar_object={solar / total * 100:.1f}%"
             )
 
     generation = _generation_balance(actions)
@@ -92,10 +95,7 @@ def analyze_capture(path: Path, *, show_ids: bool) -> None:
         for label in ("PV-Gesamtlieferung", "PV-Netzlieferung", "PV-Objektlieferung"):
             values = generation.get(label)
             if values:
-                print(
-                    f"  {label}: {_fmt(sum(values))} kWh "
-                    f"over {_covered_months(values)} month(s)"
-                )
+                print(f"  {label}: {_fmt(sum(values))} kWh over {_covered_months(values)} month(s)")
 
     overview = _overview(actions)
     if overview:
@@ -155,7 +155,9 @@ def _overview(actions: dict[str, Any]) -> dict[str, float]:
     return parsed
 
 
-def _series_from_row(row: dict[str, Any], labels_key: str, values_key: str) -> dict[str, list[float]]:
+def _series_from_row(
+    row: dict[str, Any], labels_key: str, values_key: str
+) -> dict[str, list[float]]:
     """Parse Astra's semicolon-separated label/value matrices."""
     labels = [label.strip() for label in str(row.get(labels_key) or "").split(",") if label.strip()]
     series = [
