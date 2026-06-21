@@ -35,7 +35,11 @@ Login/session id:
 
 - `s_sid`: Android session id.
 - `s_immo`: selected location/property id, initially `-1`, then `immo_sel` from
-  login.
+  login. Observed IDs are hierarchical strings:
+  - `3^...`: branch/site tree root.
+  - `4^...`: building/project level. The active account selected `4^263`.
+  - `5^...`: tenant/apartment level.
+  - `-1`: section separators in `standort_list`.
 - `s_year`: selected year.
 - `s_med`: medium id; default `1`.
 - `s_lang`: language, observed `de`.
@@ -62,6 +66,12 @@ Login/session id:
 - `get_wf`: weather forecast.
 - `lngchg_medium_list`: medium list after language change.
 
+All Android data actions share the same `ServerDataTask` request body:
+`s_sid`, `s_immo`, `s_year`, `s_med`, `s_lang`, `s_mnt`, and `s_datum`.
+The only exception found in the APK is `get_mtr_inv_pdf`, which uses
+`s_sid` and `s_id` and then opens
+`https://astra-cloud.com/{alias}/readyxnet/source/userdocs/{pdfUri}`.
+
 ### JSON Fields Observed In App Parser
 
 `auth_login`:
@@ -70,6 +80,12 @@ Login/session id:
   `is_mieter`, `is_t1t2`, `med_list`, `standort_list`.
 - `med_list[]`: `id`, `name`, `img`.
 - `standort_list[]`: `id`, `name`, `country`.
+- Selected captures contain 447 `standort_list` entries: 1 root-like `3^...`
+  entry, 2 building-level `4^...` entries, 438 tenant-level `5^...` entries,
+  and 6 separator rows. This is useful for discovery but must not be polled
+  blindly because it can enumerate other tenants under the same tree. Bounded
+  non-selected `s_immo` probes stalled; keep this as documentation-only until a
+  safe user-approved enumeration strategy exists.
 
 `get_mtr_lzs`:
 
@@ -101,6 +117,14 @@ Login/session id:
   `_lvb_ttl`. For one row, average kW is `interval_kWh * 4`.
 - Observed 2026-06-19 totals from this endpoint: total 34.966 kWh, grid
   19.399199 kWh, solar/object 16.690709 kWh, battery 0 kWh.
+- The 15-minute labels are provider-local `Europe/Berlin` interval-end labels,
+  not UTC labels. The integration converts them to UTC before importing Home
+  Assistant statistics.
+- Observed 2026-06-21 selected-location payloads from both `get_mtr_eb` and
+  `get_mtr_vbmed` contained non-zero rows only from `00:15` through `02:00`;
+  all later quarter-hour rows were zero. Before the local-time fix this looked
+  like a cutoff around 04:00 in Home Assistant. The missing later values are
+  provider/API-side; the two-hour display shift was integration-side.
 - The same payload exposes PV delivery/generation card series:
   - `_lez_ttl`: `PV-Gesamtlieferung,PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung`.
   - `_ez_ttl`: `PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung`.
@@ -109,6 +133,10 @@ Login/session id:
 - No local capture currently contains a confirmed `Gemeinstrom` /
   shared-electricity label. If the provider adds it, it should be treated as a
   separate channel only after the series semantics are verified against the UI.
+  Current selected-location Android labels only expose
+  `Gesamtbezug`, `Netzbezug`, `Objektbezug`, `PV-Bezug`, and
+  `Batterie-Bezug`; web captures additionally show report links for meter IDs
+  but no confirmed `Gemeinstrom` data row.
 
 `get_verbrauch`:
 
@@ -127,6 +155,12 @@ Login/session id:
 labels, units, colors, and chart values. These are useful for dashboards but
 should not be mapped to Energy Dashboard totals until their semantics are
 validated live.
+
+`get_wf`:
+
+- Weather forecast/card endpoint used by the app.
+- `data[0]` fields parsed by the APK: `_vll1` through `_vll6`, `_lbl6`,
+  `_ttl1`, `_ttl1_1`, and `_ttl2` through `_ttl6`.
 
 ## Local Testing
 

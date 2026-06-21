@@ -44,4 +44,23 @@ Add sanitized findings to `docs/api.md`, clearly marking app-only endpoints and 
 - The app signs form POST actions with `s_cs=md5("SNAFU" + action + timestamp)`.
 - The login/session id is `md5(username + md5(password))`.
 - Responses append `md5(payload)` as the final 32 characters.
-- Main actions and JSON schemas are documented in `docs/api.md`.
+- `Http.sendUrlRequest()` always sends a form POST, appends `s_dv=1`, uses
+  `Content-Type: application/x-www-form-urlencoded`, has a 5 second connect
+  timeout and a 60 second read timeout, reads one response line, then verifies
+  the trailing MD5 checksum.
+- The app has three request tasks:
+  - `UserLoginTask` and `UserSessionTask`: call `auth_login`.
+  - `ServerDataTask`: calls normal data actions with `s_sid`, `s_immo`,
+    `s_year`, `s_med`, `s_lang`, `s_mnt`, and `s_datum`.
+  - `StreamDataTask`: calls `get_mtr_inv_pdf` with `s_sid` and `s_id`.
+- Decompiled action list:
+  `auth_login`, `get_ts`, `get_verbrauch`, `get_mtr_vb_overview`,
+  `get_mtr_verbrauch`, `get_mtr_vbmed`, `get_mtr_hist`,
+  `get_mtr_autarkie`, `get_mtr_eb`, `get_mtr_inv`, `get_mtr_lzs`,
+  `get_mtr_inv_pdf`, `get_immo_list`, `get_wf`, and
+  `lngchg_medium_list`.
+- Invoice PDFs are not returned directly by `get_mtr_inv_pdf`; the response
+  contains `alias` and `pdfUri`, and the app opens
+  `https://astra-cloud.com/{alias}/readyxnet/source/userdocs/{pdfUri}`.
+- Main actions and JSON schemas are documented in `docs/api.md` and
+  `docs/openapi-astra-android.yaml`.

@@ -5,6 +5,7 @@ import importlib.util
 import sys
 import types
 import asyncio
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -346,7 +347,15 @@ def test_daily_interval_values_derive_grid_from_total_minus_solar() -> None:
 
     assert [point["grid_kwh"] for point in points] == [7.0, 1.0]
     assert [point["raw_grid_kwh"] for point in points] == [9.0, 1.0]
-    assert points[0]["timestamp"] == dt.datetime(2026, 6, 19, 0, 15, tzinfo=dt.UTC)
+    assert points[0]["timestamp"] == dt.datetime(2026, 6, 18, 22, 15, tzinfo=dt.UTC)
+    assert points[0]["timestamp"].astimezone(ZoneInfo("Europe/Berlin")) == dt.datetime(
+        2026,
+        6,
+        19,
+        0,
+        15,
+        tzinfo=ZoneInfo("Europe/Berlin"),
+    )
 
 
 def test_empty_interval_payloads_and_series_are_reported() -> None:

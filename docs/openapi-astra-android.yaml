@@ -186,6 +186,7 @@ components:
       properties:
         id:
           type: string
+          description: Hierarchical location id, e.g. 3^root, 4^building, 5^tenant, or -1 separator.
         name:
           type: string
         country:
@@ -219,6 +220,12 @@ components:
         v05:
           type: string
           description: Reading date/time.
+        v06:
+          type: string
+          description: Medium.
+        v07:
+          type: string
+          description: Account/order label.
     EnergyBalancePayload:
       type: object
       description: Observed `get_mtr_eb` payload.
@@ -267,12 +274,12 @@ components:
               _lt2rvb_vll:
                 type: string
                 description: Semicolon-separated tariff split values matching `_lt2rvb_ttl`.
-        v06:
-          type: string
-          description: Medium.
-        v07:
-          type: string
-          description: Account/order label.
+              _vb_lbl_14h:
+                type: string
+                description: 96 provider-local quarter-hour labels for the combined consumption chart.
+              _vb_vll_14h:
+                type: string
+                description: Semicolon-separated provider-local quarter-hour values for the combined consumption chart.
     OverviewPayload:
       type: object
       properties:
@@ -341,4 +348,60 @@ components:
               pdfUri:
                 type: string
               alias:
+                type: string
+    MediumListPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        med_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/Medium"
+    LocationListPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        standort_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+    WeatherPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              _vll1:
+                type: string
+              _vll2:
+                type: string
+              _vll3:
+                type: string
+              _vll4:
+                type: string
+              _vll5:
+                type: string
+              _vll6:
+                type: string
+              _lbl6:
+                type: string
+              _ttl1:
+                type: string
+              _ttl1_1:
+                type: string
+              _ttl2:
+                type: string
+              _ttl3:
+                type: string
+              _ttl4:
+                type: string
+              _ttl5:
+                type: string
+              _ttl6:
                 type: string

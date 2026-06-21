@@ -11,6 +11,7 @@ import logging
 import re
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from .const import (
     DAILY_INTERVAL_CONCURRENCY,
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from aiohttp import ClientSession
 
 _LOGGER = logging.getLogger(__name__)
+ASTRA_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
 
 class AstraApiError(Exception):
@@ -391,9 +393,14 @@ def _previous_month(value: date) -> date:
     return date(first.year, first.month - 1, 1)
 
 
-def _combine_utc(day: date) -> datetime:
-    """Return a UTC midnight datetime for a date."""
-    return datetime.combine(day, time.min, tzinfo=UTC)
+def _provider_day_start(day: date) -> datetime:
+    """Return Astra's provider-local day start converted to UTC."""
+    return datetime.combine(day, time.min, tzinfo=ASTRA_TIME_ZONE).astimezone(UTC)
+
+
+def _provider_local_timestamp(value: datetime) -> datetime:
+    """Return a timestamp in Astra's provider-local time zone."""
+    return value.astimezone(ASTRA_TIME_ZONE)
 
 
 def _split_csv_text(value: Any) -> list[str]:
@@ -439,13 +446,15 @@ def _redistribution_weights(
         profile_weights = []
         for index in indexes:
             timestamp = points[index]["timestamp"]
+            local_timestamp = _provider_local_timestamp(timestamp)
             bucket_weight = 0.0
             for other in points:
                 if other is points[index] or not other.get("valid", True):
                     continue
-                if abs((other["timestamp"].date() - timestamp.date()).days) > lookaround_days:
+                other_local = _provider_local_timestamp(other["timestamp"])
+                if abs((other_local.date() - local_timestamp.date()).days) > lookaround_days:
                     continue
-                if other["timestamp"].time() == timestamp.time():
+                if other_local.time() == local_timestamp.time():
                     bucket_weight += max(float(other.get(key) or 0.0), 0.0)
             profile_weights.append(bucket_weight)
         if any(profile_weights):
@@ -681,7 +690,7 @@ def _daily_interval_raw_values_from_payload(
         title.casefold(): values for title, values in zip(titles, series_values, strict=False)
     }
     points: list[dict[str, Any]] = []
-    day_start = _combine_utc(day)
+    day_start = _provider_day_start(day)
     for index, label in enumerate(labels):
         timestamp = day_start + timedelta(minutes=15 * (index + 1))
         total = _series_value(series, "Gesamtbezug", index) or 0.0
