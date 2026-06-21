@@ -984,8 +984,72 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
         "grid_kwh_total",
     )
 
-    assert [row["state"] for row in rows] == [200.0, 150.0, 175.0]
-    assert [row["sum"] for row in rows] == [0.0, 0.0, 25.0]
+    assert [row["state"] for row in rows] == [200.0]
+    assert [row["sum"] for row in rows] == [0.0]
+
+
+def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 21, 16, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=-380.0,
+                grid_kwh_total=-380.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 21, 17, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=0.9,
+                grid_kwh_total=0.9,
+            ),
+        ],
+        "grid_kwh_total",
+        state_start=899.0,
+        sum_start=899.0,
+    )
+
+    assert rows == []
+
+
+def test_statistics_rows_skip_implausible_hourly_jump() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 21, 15, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=1000.0,
+                grid_kwh_total=1000.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 21, 16, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=1380.0,
+                grid_kwh_total=1380.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 21, 17, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=1001.0,
+                grid_kwh_total=1001.0,
+            ),
+        ],
+        "grid_kwh_total",
+        max_hourly_delta=50.0,
+    )
+
+    assert [row["state"] for row in rows] == [1000.0, 1001.0]
+    assert [row["sum"] for row in rows] == [0.0, 1.0]
 
 
 def test_statistics_rows_skip_missing_timestamp_or_value() -> None:
@@ -1119,6 +1183,16 @@ class FakeSession:
         return self.response
 
 
+class EndpointSession:
+    def __init__(self, responses: dict[str, list[FakeResponse]]) -> None:
+        self.responses = responses
+        self.calls: list[str] = []
+
+    def post(self, url, **_kwargs):
+        self.calls.append(url)
+        return self.responses[url].pop(0)
+
+
 def _verified_response(body: str, status: int = 200) -> FakeResponse:
     return FakeResponse(body + astra_api._md5(body), status=status)
 
@@ -1165,6 +1239,31 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
     )
     with pytest.raises(astra_api.AstraProtocolError, match="checksum"):
         asyncio.run(checksum_client._post_raw({"s_action": "get_ts"}))
+
+
+def test_post_action_falls_back_between_mobile_endpoints() -> None:
+    bad_url = "https://bad.example.test/csandroid.php"
+    good_url = "https://good.example.test/csios.php"
+    session = EndpointSession(
+        {
+            bad_url: [FakeResponse("")],
+            good_url: [
+                _verified_response("12345"),
+                _verified_response(json.dumps({"auth": "1"})),
+            ],
+        }
+    )
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="secret",
+        base_url=f"{bad_url},{good_url}",
+    )
+
+    result = asyncio.run(client._post_action("auth_login", s_sid="sid"))
+
+    assert json.loads(result) == {"auth": "1"}
+    assert session.calls == [bad_url, good_url, good_url]
 
 
 def test_login_reports_protocol_and_auth_errors() -> None:

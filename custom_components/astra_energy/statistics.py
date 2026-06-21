@@ -83,10 +83,13 @@ def _statistics_rows(
     *,
     align_to_hour: bool = False,
     sum_start: float = 0.0,
+    state_start: float | None = None,
+    max_hourly_delta: float | None = None,
 ) -> list[dict]:
     """Convert cumulative meter readings to recorder statistics rows."""
     rows_by_start = {}
-    previous_total: float | None = None
+    previous_total: float | None = state_start
+    previous_timestamp: datetime | None = None
     current_sum = sum_start
     for reading in sorted(
         readings,
@@ -95,11 +98,44 @@ def _statistics_rows(
         total = getattr(reading, value_attr)
         if reading.timestamp is None or total is None:
             continue
-        if previous_total is not None:
-            current_sum += max(total - previous_total, 0.0)
-        previous_total = total
         timestamp = dt_util.as_utc(reading.timestamp)
         start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
+        if total < 0:
+            _LOGGER.warning(
+                "Skipping Astra negative statistic attr=%s start=%s current=%s",
+                value_attr,
+                start,
+                total,
+            )
+            continue
+        if previous_total is not None:
+            delta = total - previous_total
+            if delta < 0:
+                _LOGGER.warning(
+                    "Skipping Astra statistic rollback attr=%s start=%s previous=%s current=%s",
+                    value_attr,
+                    start,
+                    previous_total,
+                    total,
+                )
+                continue
+            if max_hourly_delta is not None and previous_timestamp is not None:
+                elapsed_hours = max(
+                    (timestamp - previous_timestamp).total_seconds() / 3600,
+                    0.25,
+                )
+                if delta > max_hourly_delta * elapsed_hours:
+                    _LOGGER.warning(
+                        "Skipping Astra statistic spike attr=%s start=%s delta=%s limit=%s",
+                        value_attr,
+                        start,
+                        delta,
+                        max_hourly_delta * elapsed_hours,
+                    )
+                    continue
+            current_sum += delta
+        previous_total = total
+        previous_timestamp = timestamp
         rows_by_start[start] = {
             "start": start,
             "state": total,
@@ -108,15 +144,15 @@ def _statistics_rows(
     return list(rows_by_start.values())
 
 
-async def _async_sum_starts(
+async def _async_statistic_starts(
     hass: HomeAssistant,
     statistic_ids: set[str],
     start: datetime,
-) -> dict[str, float]:  # pragma: no cover
-    """Return recorder sums immediately before the imported window."""
+) -> dict[str, dict[str, float]]:  # pragma: no cover
+    """Return recorder sum and state immediately before the imported window."""
     query_start = start - timedelta(days=7)
 
-    def read_sums() -> dict[str, float]:
+    def read_starts() -> dict[str, dict[str, float]]:
         try:
             from homeassistant.components.recorder.statistics import statistics_during_period
         except ImportError:
@@ -128,23 +164,42 @@ async def _async_sum_starts(
             statistic_ids,
             "hour",
             None,
-            {"sum"},
+            {"state", "sum"},
         )
-        sums = {}
+        starts = {}
         for statistic_id, rows in result.items():
             for row in reversed(rows):
-                total = row.get("sum")
-                if total is not None:
-                    sums[statistic_id] = total
+                state = row.get("state")
+                total_sum = row.get("sum")
+                if state is not None or total_sum is not None:
+                    starts[statistic_id] = {}
+                    if state is not None:
+                        starts[statistic_id]["state"] = state
+                    if total_sum is not None:
+                        starts[statistic_id]["sum"] = total_sum
                     break
-        return sums
+        return starts
 
     try:
         from homeassistant.components.recorder import get_instance
     except ImportError:
-        return await hass.async_add_executor_job(read_sums)
+        return await hass.async_add_executor_job(read_starts)
 
-    return await get_instance(hass).async_add_executor_job(read_sums)
+    return await get_instance(hass).async_add_executor_job(read_starts)
+
+
+async def _async_sum_starts(
+    hass: HomeAssistant,
+    statistic_ids: set[str],
+    start: datetime,
+) -> dict[str, float]:  # pragma: no cover
+    """Return recorder sums immediately before the imported window."""
+    starts = await _async_statistic_starts(hass, statistic_ids, start)
+    return {
+        statistic_id: values["sum"]
+        for statistic_id, values in starts.items()
+        if "sum" in values
+    }
 
 
 async def _async_interval_payload_cache(  # pragma: no cover
@@ -287,7 +342,7 @@ async def async_backfill_statistics(  # pragma: no cover
         if meter_readings
         for channel in STATISTIC_CHANNELS
     }
-    sum_starts = await _async_sum_starts(hass, statistic_ids, start)
+    statistic_starts = await _async_statistic_starts(hass, statistic_ids, start)
 
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
@@ -309,7 +364,16 @@ async def async_backfill_statistics(  # pragma: no cover
                     meter_readings,
                     value_attr,
                     align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
-                    sum_start=sum_starts.get(statistic_id, 0.0),
+                    sum_start=statistic_starts.get(statistic_id, {}).get("sum", 0.0),
+                    state_start=statistic_starts.get(statistic_id, {}).get("state"),
+                    max_hourly_delta=(
+                        coordinator.config_entry.options.get(
+                            CONF_MAX_INTERVAL_AVERAGE_KW,
+                            DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+                        )
+                        if unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+                        else None
+                    ),
                 )
             ]
             if rows:

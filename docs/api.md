@@ -186,6 +186,12 @@ python3 tools/astra_endpoint_discovery.py \
   --out captures/astra-endpoint-discovery-latest.json
 ```
 
+The Home Assistant client keeps the configured mobile URL first, then retries
+the known Android and iOS mobile endpoints when a request fails, returns a
+short/empty body, or fails checksum validation. Timestamp fetch and action fetch
+are retried as a pair on the same endpoint so mixed endpoint sessions are not
+created.
+
 ## Confirmed Installed iOS App Analysis
 
 Public App Store metadata identifies an iOS app:
@@ -355,6 +361,25 @@ probe receives empty responses, capture the app traffic through a local HTTPS
 proxy and compare only the request URL, form keys, and schema-level response
 shape. Keep raw captures out of git.
 
+## Manual Browser Cookie Fallback
+
+When the mobile endpoints return empty data but a browser session is already
+logged in, `tools/astra_web_probe.py` can use a manually supplied web session:
+
+```sh
+# .secrets.env, never committed:
+ASTRA_WEB_SESSION_ID=<sessionId from browser URL/query>
+ASTRA_WEB_COOKIE=<Cookie header value from the logged-in browser>
+
+python3 tools/astra_web_probe.py \
+  --start "2026-06-21 00:00:00" \
+  --end "2026-06-22 00:00:00"
+```
+
+This is a manual recovery/probing path for graph/report data. It avoids
+automating the browser login challenge and keeps cookies in the gitignored
+secret file.
+
 ## Local Testing
 
 The protocol can be tested without Home Assistant:
@@ -477,6 +502,10 @@ Widget RPC methods observed:
   Energy Dashboard totals until live values prove they are cumulative.
 - Use the `recent_refresh_hours` option/service field to re-fetch a recent
   overlap window, default 24 hours, when importing historical statistics.
+- Recorder import rejects negative interval values, impossible interval spikes,
+  cumulative rollbacks, and implausible hourly jumps before writing long-term
+  statistics. Rejected rows become missing data rather than negative
+  hundreds-of-kWh Energy Dashboard deltas.
 - Confirmed pricing data is currently limited to invoice totals from
   `get_mtr_inv`. Per-kWh grid/PV tariffs should only become Home Assistant price
   entities once an endpoint returns actual tariff values. When confirmed, expose

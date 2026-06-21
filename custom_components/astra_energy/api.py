@@ -17,6 +17,7 @@ from .const import (
     DAILY_INTERVAL_CONCURRENCY,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_GRID_PRICE_NET,
+    DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
@@ -120,6 +121,19 @@ def _checksum(action: str, timestamp: str) -> str:
 def _session_id(username: str, password: str) -> str:
     """Return Astra Android session id for username/password."""
     return _md5(f"{username}{_md5(password)}")
+
+
+def _base_urls_from_config(base_url: str) -> list[str]:
+    """Return configured mobile endpoints plus known compatible fallbacks."""
+    urls: list[str] = []
+    for item in re.split(r"[,;\s]+", base_url):
+        item = item.strip().rstrip("/")
+        if item and item not in urls:
+            urls.append(item)
+    for item in DEFAULT_MOBILE_BASE_URLS:
+        if item not in urls:
+            urls.append(item)
+    return urls
 
 
 def _total_or_zero(value: float | None) -> float:
@@ -813,6 +827,7 @@ class AstraClient:
         self._username = username
         self._password = password
         self._base_url = base_url.rstrip("/")
+        self._base_urls = _base_urls_from_config(base_url)
         self._authenticated = False
         self._sid = _session_id(username, password)
         self._location_id = "-1"
@@ -832,27 +847,43 @@ class AstraClient:
 
     async def _post_action(self, action: str, **params: str) -> str:  # pragma: no cover
         """POST one Android API action and verify Astra's MD5 response suffix."""
-        timestamp = await self._post_raw(
-            {
-                "s_action": "get_ts",
-                "s_ts": "",
-                "s_cs": _checksum("get_ts", ""),
-            }
-        )
-        payload = {
-            "s_action": action,
-            "s_ts": timestamp,
-            "s_cs": _checksum(action, timestamp),
-            **params,
-        }
-        return await self._post_raw(payload)
+        last_error: AstraApiError | None = None
+        for url in self._base_urls:
+            try:
+                timestamp = await self._post_raw_at_url(
+                    url,
+                    {
+                        "s_action": "get_ts",
+                        "s_ts": "",
+                        "s_cs": _checksum("get_ts", ""),
+                    },
+                )
+                payload = {
+                    "s_action": action,
+                    "s_ts": timestamp,
+                    "s_cs": _checksum(action, timestamp),
+                    **params,
+                }
+                return await self._post_raw_at_url(url, payload)
+            except AstraApiError as err:
+                last_error = err
+                _LOGGER.debug("Astra mobile endpoint failed for action=%s url=%s: %s", action, url, err)
+        if last_error is not None:
+            raise last_error
+        raise AstraApiError("No Astra mobile endpoints configured")
 
     async def _post_raw(self, payload: dict[str, str]) -> str:  # pragma: no cover
         """POST form data and return the checksum-verified body payload."""
+        return await self._post_raw_at_url(self._base_url, payload)
+
+    async def _post_raw_at_url(
+        self, url: str, payload: dict[str, str]
+    ) -> str:  # pragma: no cover
+        """POST form data to one endpoint and return the checksum-verified payload."""
         payload = {**payload, "s_dv": "1"}
         try:
             async with self._session.post(
-                self._base_url,
+                url,
                 data=payload,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             ) as response:

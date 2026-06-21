@@ -15,6 +15,11 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import urllib.request
 
+try:
+    from tools.env_loader import getenv
+except ModuleNotFoundError:
+    from env_loader import getenv
+
 
 GRAPH_IDS = {
     "total": "-24557",
@@ -51,6 +56,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capture", default="captures/web-login.jsonl")
     parser.add_argument("--out-dir", default="captures")
+    parser.add_argument("--session-id", default=getenv("ASTRA_WEB_SESSION_ID"))
+    parser.add_argument("--cookie", default=getenv("ASTRA_WEB_COOKIE"))
     parser.add_argument("--start", default="2026-06-19 00:00:00")
     parser.add_argument("--end", default="2026-06-20 00:00:00")
     parser.add_argument("--width", default="1600")
@@ -61,8 +68,8 @@ def main() -> int:
     capture = Path(args.capture)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    session_id = _extract_session_id(capture)
-    report_urls = _extract_report_urls(capture)
+    session_id = args.session_id or _extract_session_id(capture)
+    report_urls = _extract_report_urls(capture) if capture.exists() else []
     date_slug = args.start[:10]
 
     all_points: dict[str, list[Point]] = {}
@@ -76,6 +83,7 @@ def main() -> int:
                 end=args.end,
                 width=args.width,
                 height=args.height,
+                cookie=args.cookie,
             )
             html_path.write_text(html, encoding="latin-1", errors="ignore")
         else:
@@ -104,7 +112,11 @@ def main() -> int:
         path = out_dir / f"astra-web-report-{index:02d}.html"
         if not args.skip_fetch or not path.exists():
             try:
-                path.write_text(_fetch_url(url), encoding="latin-1", errors="ignore")
+                path.write_text(
+                    _fetch_url(url, cookie=args.cookie),
+                    encoding="latin-1",
+                    errors="ignore",
+                )
                 time.sleep(0.25)
             except Exception as err:  # noqa: BLE001
                 fetched_reports.append({"path": str(path), "error": str(err)})
@@ -150,6 +162,7 @@ def _fetch_graph(
     end: str,
     width: str,
     height: str,
+    cookie: str | None = None,
 ) -> str:
     start_de = _to_de_datetime(start)
     end_de = _to_de_datetime(end)
@@ -167,16 +180,19 @@ def _fetch_graph(
         "s_height": height,
     }
     url = "https://astra-cloud.com/astra04/readyxnet/source/pm/pm_graph.php?" + urlencode(params)
-    return _fetch_url(url)
+    return _fetch_url(url, cookie=cookie)
 
 
-def _fetch_url(url: str) -> str:
+def _fetch_url(url: str, *, cookie: str | None = None) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0 AstraEnergyProbe/1.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
     request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0 AstraEnergyProbe/1.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
+        headers=headers,
     )
     with urllib.request.urlopen(request, timeout=45) as response:
         return response.read().decode("latin-1", errors="ignore")

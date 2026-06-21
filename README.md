@@ -78,6 +78,14 @@ python3 tools/cdp_capture.py \
 
 Log in in the opened Chrome window, browse all relevant usage views, then stop the script with `Ctrl-C`.
 
+When the mobile endpoints are unavailable but you have a working browser
+session, use the manual cookie fallback without another CDP capture:
+
+```sh
+# fill ASTRA_WEB_SESSION_ID and ASTRA_WEB_COOKIE in .secrets.env from the browser
+python3 tools/astra_web_probe.py --start "2026-06-21 00:00:00" --end "2026-06-22 00:00:00"
+```
+
 Create sanitized API docs from the capture:
 
 ```sh
@@ -123,6 +131,9 @@ Copy or symlink `custom_components/astra_energy` into a Home Assistant config di
 The current implementation authenticates through `csandroid.php` and creates
 Energy Dashboard-compatible `kWh` sensors from the latest meter-reading endpoint
 when Astra returns cumulative `kWh` rows.
+If the configured mobile endpoint returns an invalid or empty response, the
+client retries the known Android and iOS mobile endpoints before reporting the
+update failure.
 
 Historical import is available as the `astra_energy.backfill_history` action.
 By default it only fetches and logs historical readings. Enable
@@ -143,10 +154,13 @@ Quarter-hour payloads are cached in Home Assistant storage after the first
 successful fetch. Later imports reuse cached old days and only re-fetch the
 recent overlap window so Astra is not hammered for immutable history. The
 importer also rejects impossible negative or spike values before writing
-recorder statistics. Delayed/bunched values are redistributed over preceding
-flat intervals when possible, and impossible residential-scale spikes are
-rejected. Enable debug logging for `custom_components.astra_energy` to see API
-action timing, fetched-vs-cached day counts, and anomaly repair counters.
+recorder statistics. Recorder imports also skip cumulative rollbacks and
+implausible hourly jumps so a bad provider value cannot create negative
+hundreds-of-kWh Energy Dashboard deltas. Delayed/bunched values are
+redistributed over preceding flat intervals when possible, and impossible
+residential-scale spikes are rejected. Enable debug logging for
+`custom_components.astra_energy` to see API action timing, fetched-vs-cached day
+counts, and anomaly repair counters.
 
 Quality-scale tracking is in `docs/quality-scale.md`.
 

@@ -29,6 +29,11 @@ HISTORY_GRANULARITIES = [
 ]
 
 DEFAULT_BASE_URL = "https://astra-cloud.com/readyxnet/source/login/csandroid.php"
+DEFAULT_IOS_BASE_URL = "https://astra-cloud.com/readyxnet/source/login/csios.php"
+DEFAULT_MOBILE_BASE_URLS = [
+    DEFAULT_BASE_URL,
+    DEFAULT_IOS_BASE_URL,
+]
 DEFAULT_POLL_INTERVAL = 900
 DEFAULT_BACKFILL_DAYS = 7
 DEFAULT_RECENT_REFRESH_HOURS = 24
