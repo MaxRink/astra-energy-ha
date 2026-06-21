@@ -10,6 +10,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import selector
 
 from .api import AstraApiError, AstraAuthError, AstraClient
 from .const import (
@@ -67,6 +68,26 @@ class InvalidAuth(Exception):
     """Invalid Astra authentication."""
 
 
+def _number_box(
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    step: float | None = None,
+    unit: str | None = None,
+) -> selector.NumberSelector:
+    """Return a box-mode number selector so the UI shows the actual value."""
+    config: dict[str, Any] = {"mode": selector.NumberSelectorMode.BOX}
+    if min_value is not None:
+        config["min"] = min_value
+    if max_value is not None:
+        config["max"] = max_value
+    if step is not None:
+        config["step"] = step
+    if unit is not None:
+        config["unit_of_measurement"] = unit
+    return selector.NumberSelector(selector.NumberSelectorConfig(**config))
+
+
 async def _async_validate_input(hass, user_input: dict[str, Any]) -> None:
     """Validate Astra credentials by logging in through the Android API."""
     client = AstraClient(
@@ -94,15 +115,15 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(
                 CONF_POLL_INTERVAL,
                 default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL)),
+            ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
             vol.Required(
                 CONF_BACKFILL_DAYS,
                 default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_BACKFILL_DAYS)),
+            ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
             vol.Required(
                 CONF_RECENT_REFRESH_HOURS,
                 default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RECENT_REFRESH_HOURS)),
+            ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
             vol.Required(
                 CONF_HISTORY_GRANULARITY,
                 default=defaults.get(
@@ -117,21 +138,33 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(
                 CONF_GRID_PRICE_NET,
                 default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
-            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+            ): _number_box(
+                min_value=MIN_PRICE_NET,
+                max_value=MAX_PRICE_NET,
+                step=0.00001,
+                unit="EUR/kWh",
+            ),
             vol.Required(
                 CONF_SOLAR_PRICE_NET,
                 default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
-            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_PRICE_NET, max=MAX_PRICE_NET)),
+            ): _number_box(
+                min_value=MIN_PRICE_NET,
+                max_value=MAX_PRICE_NET,
+                step=0.00001,
+                unit="EUR/kWh",
+            ),
             vol.Required(
                 CONF_TAX_RATE,
                 default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-            ): vol.All(vol.Coerce(float), vol.Range(min=MIN_TAX_RATE, max=MAX_TAX_RATE)),
+            ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
             vol.Required(
                 CONF_MAX_INTERVAL_AVERAGE_KW,
                 default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
-            ): vol.All(
-                vol.Coerce(float),
-                vol.Range(min=MIN_MAX_INTERVAL_AVERAGE_KW, max=MAX_MAX_INTERVAL_AVERAGE_KW),
+            ): _number_box(
+                min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
+                max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
+                step=0.1,
+                unit="kW",
             ),
             vol.Required(
                 CONF_SMOOTH_INTERVAL_ANOMALIES,
@@ -145,21 +178,22 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
                     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
                 ),
-            ): vol.All(
-                vol.Coerce(int),
-                vol.Range(
-                    min=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-                    max=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
-                ),
+            ): _number_box(
+                min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+                max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+                step=1,
+                unit="buckets",
             ),
             vol.Required(
                 CONF_SMOOTHING_LOOKAROUND_DAYS,
                 default=defaults.get(
                     CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
                 ),
-            ): vol.All(
-                vol.Coerce(int),
-                vol.Range(min=MIN_SMOOTHING_LOOKAROUND_DAYS, max=MAX_SMOOTHING_LOOKAROUND_DAYS),
+            ): _number_box(
+                min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
+                max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
+                step=1,
+                unit="d",
             ),
             vol.Required(
                 CONF_CACHE_INTERVAL_PAYLOADS,
@@ -172,18 +206,18 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
 def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     """Return config entry options controlled by the UI."""
     return {
-        CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
-        CONF_BACKFILL_DAYS: user_input[CONF_BACKFILL_DAYS],
-        CONF_RECENT_REFRESH_HOURS: user_input[CONF_RECENT_REFRESH_HOURS],
+        CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
+        CONF_BACKFILL_DAYS: int(user_input[CONF_BACKFILL_DAYS]),
+        CONF_RECENT_REFRESH_HOURS: int(user_input[CONF_RECENT_REFRESH_HOURS]),
         CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
         CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
-        CONF_GRID_PRICE_NET: user_input[CONF_GRID_PRICE_NET],
-        CONF_SOLAR_PRICE_NET: user_input[CONF_SOLAR_PRICE_NET],
-        CONF_TAX_RATE: user_input[CONF_TAX_RATE],
-        CONF_MAX_INTERVAL_AVERAGE_KW: user_input[CONF_MAX_INTERVAL_AVERAGE_KW],
+        CONF_GRID_PRICE_NET: float(user_input[CONF_GRID_PRICE_NET]),
+        CONF_SOLAR_PRICE_NET: float(user_input[CONF_SOLAR_PRICE_NET]),
+        CONF_TAX_RATE: float(user_input[CONF_TAX_RATE]),
+        CONF_MAX_INTERVAL_AVERAGE_KW: float(user_input[CONF_MAX_INTERVAL_AVERAGE_KW]),
         CONF_SMOOTH_INTERVAL_ANOMALIES: user_input[CONF_SMOOTH_INTERVAL_ANOMALIES],
-        CONF_ANOMALY_REDISTRIBUTION_WINDOW: user_input[CONF_ANOMALY_REDISTRIBUTION_WINDOW],
-        CONF_SMOOTHING_LOOKAROUND_DAYS: user_input[CONF_SMOOTHING_LOOKAROUND_DAYS],
+        CONF_ANOMALY_REDISTRIBUTION_WINDOW: int(user_input[CONF_ANOMALY_REDISTRIBUTION_WINDOW]),
+        CONF_SMOOTHING_LOOKAROUND_DAYS: int(user_input[CONF_SMOOTHING_LOOKAROUND_DAYS]),
         CONF_CACHE_INTERVAL_PAYLOADS: user_input[CONF_CACHE_INTERVAL_PAYLOADS],
     }
 
@@ -319,7 +353,7 @@ class AstraEnergyOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Manage options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(title="", data=_options_from_input(user_input))
 
         return self.async_show_form(
             step_id="init",
