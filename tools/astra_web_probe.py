@@ -22,9 +22,9 @@ except ModuleNotFoundError:
 
 
 GRAPH_IDS = {
-    "total": "-24557",
-    "grid": "-26183",
-    "solar": "-26184",
+    "total": "",
+    "grid": "",
+    "solar": "",
 }
 TITLE_RE = re.compile(
     r'TITLE="[^"]* ist\s+([0-9.,-]+)\s+kWh\s+um\s+'

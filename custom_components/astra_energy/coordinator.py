@@ -179,6 +179,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             "invalid_response",
             "login_required",
             "missing_cookie",
+            "missing_graph_id",
             "missing_session_id",
             "no_data",
             "unreachable",

@@ -137,6 +137,13 @@ async def async_check_web_session(
             message="Astra web fallback is enabled but no sessionId is configured",
             graph_id=graph_id,
         )
+    if not graph_id:
+        return AstraWebSessionStatus(
+            status="missing_graph_id",
+            checked_at=checked_at,
+            message="Astra web fallback is enabled but no graph ID is configured",
+            graph_id=graph_id,
+        )
     if not cookie:
         return AstraWebSessionStatus(
             status="missing_cookie",

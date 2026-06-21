@@ -150,8 +150,8 @@ def test_small_parsing_helpers_cover_missing_values() -> None:
     assert astra_api._parse_datetime("not a date") is None
     assert astra_api._normalize_identifier(None) is None
     assert astra_api._normalize_identifier("   ") is None
-    assert astra_api._normalize_identifier("ZT2 052/0") == "ZT2_052_0"
-    assert astra_api._raw_meter_id_from_row({"v01": "ZT2_052/0"}) == "ZT2_052_0"
+    assert astra_api._normalize_identifier("TEST Solar/0") == "TEST_Solar_0"
+    assert astra_api._raw_meter_id_from_row({"v01": "TEST_SOLAR_0"}) == "TEST_SOLAR_0"
     assert astra_api._raw_meter_id_from_row({"v01": "Strom VGB"}) is None
 
 
@@ -218,7 +218,7 @@ def test_parse_meter_uses_raw_meter_id_when_available() -> None:
             "auth": "1",
             "data": [
                 {
-                    "id": "ZT2_052/0",
+                    "id": "TEST_SOLAR/0",
                     "v01": "Main meter",
                     "v02": "1.234,5",
                     "v03": "kWh",
@@ -229,8 +229,8 @@ def test_parse_meter_uses_raw_meter_id_when_available() -> None:
             ],
         }
     )
-    assert readings[0].meter_id == "ZT2_052_0"
-    assert readings[0].raw_meter_id == "ZT2_052_0"
+    assert readings[0].meter_id == "TEST_SOLAR_0"
+    assert readings[0].raw_meter_id == "TEST_SOLAR_0"
     assert readings[0].legacy_meter_id.startswith("derived_")
 
 
@@ -246,7 +246,7 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
             "auth": "1",
             "data": [
                 {
-                    "v01": "1EBZ0103002978/0",
+                    "v01": "TEST_TOTAL/0",
                     "v02": "5.517,247",
                     "v03": "kWh",
                     "v04": "2.432,418",
@@ -255,7 +255,7 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
                     "v07": "Wohnung Strom",
                 },
                 {
-                    "v01": "ZT1_052/0",
+                    "v01": "TEST_GRID/0",
                     "v02": "4.695,978",
                     "v03": "kWh",
                     "v04": "1.605,326",
@@ -264,7 +264,7 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
                     "v07": "Wohnung Netzstrom",
                 },
                 {
-                    "v01": "ZT2_052/0",
+                    "v01": "TEST_SOLAR/0",
                     "v02": "743,183",
                     "v03": "kWh",
                     "v04": "286,016",
@@ -276,14 +276,14 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
         }
     )
     assert len(readings) == 1
-    assert readings[0].meter_id == "1EBZ0103002978_0"
+    assert readings[0].meter_id == "TEST_TOTAL_0"
     assert readings[0].grid_kwh_total == 4774.064
     assert readings[0].solar_kwh_total == 743.183
     assert readings[0].total_kwh == 5517.247
     assert readings[0].raw["raw_grid_kwh_total"] == 4695.978
     assert readings[0].raw["grid_source"] == "derived_total_minus_solar"
-    assert readings[0].raw["channels"]["grid"]["raw_meter_id"] == "ZT1_052_0"
-    assert readings[0].raw["channels"]["solar"]["raw_meter_id"] == "ZT2_052_0"
+    assert readings[0].raw["channels"]["grid"]["raw_meter_id"] == "TEST_GRID_0"
+    assert readings[0].raw["channels"]["solar"]["raw_meter_id"] == "TEST_SOLAR_0"
 
 
 def test_channel_classification_and_ungrouped_reading() -> None:
@@ -1210,8 +1210,8 @@ def test_interval_hour_start_handles_exact_hour() -> None:
 
 def test_statistics_ids_match_suggested_entity_ids() -> None:
     reading = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978_0",
-        meter_name="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL_0",
+        meter_name="TEST_TOTAL/0",
         timestamp=None,
         power_w=None,
         imported_kwh_total=None,
@@ -1611,9 +1611,20 @@ def test_web_session_check_reports_incomplete_configuration() -> None:
             FakeGetSession(),
             session_id="abc",
             cookie="",
+            graph_id="test_graph",
         )
     )
     assert missing_cookie.status == "missing_cookie"
+
+    missing_graph = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(),
+            session_id="abc",
+            cookie="sid=secret",
+            graph_id="",
+        )
+    )
+    assert missing_graph.status == "missing_graph_id"
 
 
 def test_web_session_check_reports_unreachable_and_logged_out() -> None:
@@ -1622,6 +1633,7 @@ def test_web_session_check_reports_unreachable_and_logged_out() -> None:
             FakeGetSession(error=OSError("network down")),
             session_id="abc",
             cookie="sid=secret",
+            graph_id="test_graph",
         )
     )
     assert unreachable.status == "unreachable"
@@ -1632,6 +1644,7 @@ def test_web_session_check_reports_unreachable_and_logged_out() -> None:
             FakeGetSession(response=FakeResponse('<form action="csloginw.php">Passwort</form>')),
             session_id="abc",
             cookie="sid=secret",
+            graph_id="test_graph",
         )
     )
     assert logged_out.status == "login_required"
@@ -1643,6 +1656,7 @@ def test_web_session_check_reports_http_errors() -> None:
             FakeGetSession(response=FakeResponse("server error", status=503)),
             session_id="abc",
             cookie="sid=secret",
+            graph_id="test_graph",
         )
     )
 
@@ -1663,6 +1677,7 @@ def test_web_session_check_reports_valid_cookie_session() -> None:
             session,
             session_id="abc",
             cookie="sid=secret",
+            graph_id="test_graph",
         )
     )
 

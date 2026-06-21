@@ -66,7 +66,7 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 - Seen: `1` time(s)
 - Statuses: `200`
 - MIME types: `text/html`
-- Query: `{"C_USER": "<redacted>", "Report": "2", "hID": "269", "id": "24557", "prnr": "6320", "s_back": "4", "s_year": "2026", "sessionId": "<redacted>"}`
+- Query: `{"C_USER": "<redacted>", "Report": "2", "hID": "<redacted-id>", "id": "<redacted-id>", "prnr": "<redacted-id>", "s_back": "4", "s_year": "2026", "sessionId": "<redacted>"}`
 - Request body kind: `none observed`
 - Request body summary: none
 - Response body hints: `{"body_bytes": 15415, "linked_php_js": ["pm_help.js", "pm_prbzgww.js"], "text_hints": ["Verbrauch", "kWh", "Warnwert", "Grenzwert"]}`
@@ -77,7 +77,7 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 - Seen: `7` time(s)
 - Statuses: `200`
 - MIME types: `text/html`
-- Query: `{"C_IMMOID": "<redacted>", "C_USER": "<redacted>", "Report": "4", "prnr": "6320", "prnr1": "269", "s_fday": "06", "s_gtz": "0", "s_year": "2026", "sessionId": "<redacted>"}`
+- Query: `{"C_IMMOID": "<redacted>", "C_USER": "<redacted>", "Report": "4", "prnr": "<redacted-id>", "prnr1": "<redacted-id>", "s_fday": "06", "s_gtz": "0", "s_year": "2026", "sessionId": "<redacted>"}`
 - Request body kind: `none observed`
 - Request body summary: none
 - Response body hints: `{"body_bytes": 43960, "text_hints": ["Geraet", "kWh"]}`
@@ -88,7 +88,7 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 - Seen: `1` time(s)
 - Statuses: `200`
 - MIME types: `text/html`
-- Query: `{"prnr1": "269", "sessionId": "<redacted>"}`
+- Query: `{"prnr1": "<redacted-id>", "sessionId": "<redacted>"}`
 - Request body kind: `none observed`
 - Request body summary: none
 - Response body hints: `{"body_bytes": 6064, "linked_php_js": ["pm_help.js", "pm_zw.js"], "text_hints": ["Zählerstand"]}`
@@ -189,7 +189,7 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 - MIME types: `text/html`
 - Query: `{"t": "1781988170490"}`
 - Request body kind: `json`
-- Request body summary: `{"json_keys": ["id", "method", "params"], "param_keys": ["sessionId", "url", "userId"], "params": {"sessionId": "<redacted>", "url": "pm_repzw.php?sessionId=<redacted>&prnr1=269", "userId": "<redacted>"}, "rpc_method": "PMCustomContent::isSessionAlive"}`
+- Request body summary: `{"json_keys": ["id", "method", "params"], "param_keys": ["sessionId", "url", "userId"], "params": {"sessionId": "<redacted>", "url": "pm_repzw.php?sessionId=<redacted>&prnr1=<redacted-id>", "userId": "<redacted>"}, "rpc_method": "PMCustomContent::isSessionAlive"}`
 - Response body hints: `{"body_bytes": 60, "response_content_items": 1, "response_content_schema": ["keys=['content']"], "response_json_keys": ["id", "result"]}`
 - Auth/session: inspect raw capture locally; sensitive headers are redacted here.
 
@@ -240,7 +240,7 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 ### `PMCustomContent::isSessionAlive`
 
 - Seen: `4` time(s)
-- Sample params: `{"sessionId": "<redacted>", "url": "pm_repzw.php?sessionId=<redacted>&prnr1=269", "userId": "<redacted>"}`
+- Sample params: `{"sessionId": "<redacted>", "url": "pm_repzw.php?sessionId=<redacted>&prnr1=<redacted-id>", "userId": "<redacted>"}`
 
 ## Report Variants
 
@@ -267,12 +267,8 @@ Sensitive values are redacted. Raw captures stay local and are gitignored.
 - `login.php?sessionId=&LS=`
 - `pm_help.js`
 - `pm_prbzgww.js`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=24557&hID=269&s_back=4&Report=2&s_year=2026&prnr=6320&C_USER=<redacted>`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=24557&hID=269&s_back=4&Report=3&s_year=2026&prnr=6320&C_USER=<redacted>`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=26183&hID=269&s_back=4&Report=2&s_year=2026&prnr=6320&C_USER=<redacted>`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=26183&hID=269&s_back=4&Report=3&s_year=2026&prnr=6320&C_USER=<redacted>`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=26184&hID=269&s_back=4&Report=2&s_year=2026&prnr=6320&C_USER=<redacted>`
-- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=26184&hID=269&s_back=4&Report=3&s_year=2026&prnr=6320&C_USER=<redacted>`
+- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=<redacted-id>&hID=<redacted-id>&s_back=4&Report=2&s_year=2026&prnr=<redacted-id>&C_USER=<redacted>`
+- `pm_prbzgww.php?sessionId=<redacted>&s_prod=&id=<redacted-id>&hID=<redacted-id>&s_back=4&Report=3&s_year=2026&prnr=<redacted-id>&C_USER=<redacted>`
 - `pm_zw.js`
 - `pwdreset.php`
 

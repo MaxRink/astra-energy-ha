@@ -17,6 +17,7 @@ venv/
 # Raw Astra captures may contain credentials, cookies, tokens, meter IDs, and
 # personal consumption data. Keep them local only.
 captures/
+reports/
 *.har
 *.pcap
 *.apk
