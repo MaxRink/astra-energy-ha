@@ -261,7 +261,7 @@ def _statistics_rows(
                     continue
                 rows_by_start[start] = {
                     "start": start,
-                    "state": previous_total,
+                    "state": total,
                     "sum": current_sum,
                 }
                 previous_timestamp = timestamp

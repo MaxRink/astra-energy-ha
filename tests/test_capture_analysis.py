@@ -1235,7 +1235,7 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
         "grid_kwh_total",
     )
 
-    assert [row["state"] for row in rows] == [200.0, 200.0, 200.0]
+    assert [row["state"] for row in rows] == [200.0, 150.0, 175.0]
     assert [row["sum"] for row in rows] == [0.0, 0.0, 0.0]
 
 
@@ -1267,7 +1267,7 @@ def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
     assert rows == [
         {
             "start": dt.datetime(2026, 6, 21, 17, 0, tzinfo=dt.UTC),
-            "state": 899.0,
+            "state": 0.9,
             "sum": 899.0,
         }
     ]
@@ -1343,7 +1343,7 @@ def test_statistics_rows_flatten_provider_rollback_to_repair_existing_spike() ->
         },
         {
             "start": dt.datetime(2026, 6, 22, 15, 0, tzinfo=dt.UTC),
-            "state": pytest.approx(1109.27510315664),
+            "state": pytest.approx(763.589),
             "sum": pytest.approx(1109.2751031566356),
         },
     ]
