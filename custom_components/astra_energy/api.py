@@ -119,6 +119,38 @@ def _checksum(action: str, timestamp: str) -> str:
     return _md5(f"SNAFU{action}{timestamp}")
 
 
+def _looks_like_md5(value: str) -> bool:
+    """Return whether a value can be an Astra response checksum."""
+    return len(value) == 32 and all(char in "0123456789abcdefABCDEF" for char in value)
+
+
+def _response_shape(text: str) -> str:
+    """Return a safe, compact response shape for protocol errors."""
+    stripped = text.lstrip()
+    lower = stripped[:256].casefold()
+    if lower.startswith("<!doctype html") or lower.startswith("<html") or "<html" in lower:
+        return "HTML"
+    if lower.startswith("{") or lower.startswith("["):
+        return "JSON"
+    return "plain text"
+
+
+def _checksum_verified_body(text: str) -> str:
+    """Return response body after validating Astra's trailing MD5 checksum."""
+    if len(text) < 32:
+        raise AstraProtocolError("Astra response is too short")
+    body = text[:-32]
+    checksum = text[-32:]
+    if not _looks_like_md5(checksum):
+        shape = _response_shape(text)
+        raise AstraProtocolError(
+            f"Astra response is not checksum-suffixed ({shape} response)"
+        )
+    if _md5(body) != checksum:
+        raise AstraProtocolError("Astra response checksum mismatch")
+    return body
+
+
 def _session_id(username: str, password: str) -> str:
     """Return Astra Android session id for username/password."""
     return _md5(f"{username}{_md5(password)}")
@@ -1048,13 +1080,7 @@ class AstraClient:
             raise
         except Exception as err:  # noqa: BLE001
             raise AstraApiError(f"Astra request failed: {type(err).__name__}: {err}") from err
-        if len(text) < 32:
-            raise AstraProtocolError("Astra response is too short")
-        body = text[:-32]
-        checksum = text[-32:]
-        if _md5(body) != checksum:
-            raise AstraProtocolError("Astra response checksum mismatch")
-        return body
+        return _checksum_verified_body(text)
 
     async def async_login(self) -> None:  # pragma: no cover
         """Authenticate through the Android JSON endpoint."""

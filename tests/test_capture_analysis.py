@@ -872,6 +872,39 @@ def test_interval_sanitizer_clips_unallocatable_solar_overflow() -> None:
     assert all(0.0 <= point["solar_kwh"] <= point["total_kwh"] for point in sanitized)
 
 
+def test_interval_split_invariants_clip_partially_allocatable_solar_overflow() -> None:
+    points = [
+        {"total_kwh": 1.0, "solar_kwh": 10.0},
+        {"total_kwh": 1.0, "solar_kwh": 0.0},
+    ]
+    report: dict[str, int] = {}
+
+    astra_api._enforce_interval_split_invariants(points, report)
+
+    assert points == [
+        {"total_kwh": 1.0, "solar_kwh": 1.0},
+        {"total_kwh": 1.0, "solar_kwh": 1.0},
+    ]
+    assert report["solar_kwh_overflow_reallocated"] == 1
+    assert report["solar_kwh_overflow_clipped"] == 1
+
+
+def test_interval_split_invariants_tolerate_tiny_solar_overflow_share() -> None:
+    points = [
+        {"total_kwh": 0.0, "solar_kwh": 1e-200},
+        {"total_kwh": 1e-200, "solar_kwh": 0.0},
+    ]
+    report: dict[str, int] = {}
+
+    astra_api._enforce_interval_split_invariants(points, report)
+
+    assert points == [
+        {"total_kwh": 0.0, "solar_kwh": 0.0},
+        {"total_kwh": 1e-200, "solar_kwh": 0.0},
+    ]
+    assert report["solar_kwh_overflow_reallocated"] == 1
+
+
 def test_overview_metrics_derive_grid_and_keep_raw_grid() -> None:
     metrics = astra_api._overview_metrics_from_payload(
         {
@@ -1512,6 +1545,21 @@ def test_monotonic_reading_repairs_observed_provider_split_rollback() -> None:
     assert repaired.raw["monotonic_repair"]["provider_grid_kwh_total"] == 4783.599
 
 
+def test_monotonic_reading_keeps_consistent_provider_reading() -> None:
+    provider = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=10.0,
+        grid_kwh_total=10.0,
+        solar_kwh_total=5.0,
+        total_kwh=15.0,
+    )
+
+    assert astra_api.monotonic_reading(provider, None) is provider
+
+
 def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
     provider = astra_api.AstraMeterReading(
         meter_id="1EBZ0103002978/0",
@@ -1684,8 +1732,10 @@ def test_statistics_channels_include_historical_derived_metrics() -> None:
 
 
 def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
+    monthly_channels = statistics._statistic_channels_for_granularity("monthly")
     channels = statistics._statistic_channels_for_granularity("quarter_hour")
 
+    assert "current_month_total_energy" in monthly_channels
     assert "imported_energy" in channels
     assert "solar_energy" in channels
     assert "total_energy" in channels
@@ -1793,12 +1843,52 @@ def test_state_and_mean_statistics_rows_shape_values() -> None:
         "tax_rate",
         value_multiplier=100.0,
     )
+    missing_timestamp = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=None,
+        current_month_total_kwh=999.0,
+        tax_rate=0.19,
+    )
+    missing_value = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 7, 1, 0, 30, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=None,
+        current_month_total_kwh=None,
+        tax_rate=None,
+    )
 
     assert [row["state"] for row in rows] == [400.0, 0.5]
     assert all(row["sum"] is None for row in rows)
     assert tax_rows[0]["state"] == 19.0
     assert mean_rows[0]["mean"] == 19.0
     assert "state" not in mean_rows[0]
+    assert statistics._statistics_state_rows([missing_timestamp], "current_month_total_kwh") == []
+    assert statistics._statistics_state_rows([missing_value], "current_month_total_kwh") == []
+    assert statistics._statistics_mean_rows([missing_timestamp], "tax_rate") == []
+    assert statistics._statistics_mean_rows([missing_value], "tax_rate") == []
+
+
+def test_statistics_helpers_shape_batches_and_sparse_rows() -> None:
+    class FakeStatisticData:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    start = dt.datetime(2026, 7, 1, tzinfo=dt.UTC)
+
+    assert statistics._batches([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+    assert statistics._statistic_data(
+        FakeStatisticData,
+        {"start": start, "state": 1.0, "sum": None},
+    ).kwargs == {"start": start, "state": 1.0, "sum": None}
+    assert statistics._statistic_data(
+        FakeStatisticData,
+        {"start": start, "mean": 19.0},
+    ).kwargs == {"start": start, "mean": 19.0}
 
 
 class FakeResponse:
@@ -1902,6 +1992,41 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
     )
     with pytest.raises(astra_api.AstraProtocolError, match="too short"):
         asyncio.run(short_client._post_raw({"s_action": "get_ts"}))
+
+    html_client = astra_api.AstraClient(
+        FakeSession(
+            response=FakeResponse(
+                "<html><body>login page without checksum suffix</body></html>"
+            )
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraProtocolError, match="HTML response"):
+        asyncio.run(html_client._post_raw({"s_action": "get_ts"}))
+
+    json_client = astra_api.AstraClient(
+        FakeSession(
+            response=FakeResponse(
+                '{"auth": "1", "data": [], "message": "missing checksum suffix"}'
+            )
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraProtocolError, match="JSON response"):
+        asyncio.run(json_client._post_raw({"s_action": "get_ts"}))
+
+    text_client = astra_api.AstraClient(
+        FakeSession(response=FakeResponse("service unavailable without checksum suffix")),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraProtocolError, match="plain text response"):
+        asyncio.run(text_client._post_raw({"s_action": "get_ts"}))
 
     checksum_client = astra_api.AstraClient(
         FakeSession(response=FakeResponse("body" + "0" * 32)),
