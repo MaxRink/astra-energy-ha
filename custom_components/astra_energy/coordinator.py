@@ -178,7 +178,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             f"sensor.{SENSOR_OBJECT_IDS[channel]}"
             for channel in _BASELINE_STATISTIC_ATTRS
         }
-        baselines = await _async_latest_statistic_states(self.hass, statistic_ids)
+        baselines = await _async_recorder_baseline_states(self.hass, statistic_ids)
         if not baselines:
             return {}
         baseline_readings = {}
@@ -240,10 +240,10 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             )
 
 
-async def _async_latest_statistic_states(
+async def _async_recorder_baseline_states(
     hass: HomeAssistant, statistic_ids: set[str]
 ) -> dict[str, float]:  # pragma: no cover
-    """Read the latest recorder states for cumulative Astra energy sensors."""
+    """Read monotonic recorder baselines for cumulative Astra energy sensors."""
     end = dt_util.utcnow()
     start = end - timedelta(days=30)
 
@@ -261,14 +261,7 @@ async def _async_latest_statistic_states(
             None,
             {"state"},
         )
-        states: dict[str, float] = {}
-        for statistic_id, rows in result.items():
-            for row in reversed(rows):
-                state = row.get("state")
-                if state is not None:
-                    states[statistic_id] = float(state)
-                    break
-        return states
+        return _max_statistic_states(result)
 
     try:
         from homeassistant.components.recorder import get_instance
@@ -276,6 +269,16 @@ async def _async_latest_statistic_states(
         return await hass.async_add_executor_job(read_latest)
 
     return await get_instance(hass).async_add_executor_job(read_latest)
+
+
+def _max_statistic_states(rows_by_statistic_id: dict[str, list[dict]]) -> dict[str, float]:
+    """Return the maximum available state for each statistic id."""
+    states: dict[str, float] = {}
+    for statistic_id, rows in rows_by_statistic_id.items():
+        present_states = [float(row["state"]) for row in rows if row.get("state") is not None]
+        if present_states:
+            states[statistic_id] = max(present_states)
+    return states
 
 
 def _baseline_reading_from_statistics(

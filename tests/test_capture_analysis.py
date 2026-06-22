@@ -1440,6 +1440,29 @@ def test_recorder_baseline_returns_none_without_statistics() -> None:
     assert astra_coordinator._baseline_reading_from_statistics(reading, {}) is None
 
 
+def test_recorder_baseline_uses_maximum_state_when_latest_is_polluted() -> None:
+    assert astra_coordinator._max_statistic_states(
+        {
+            "sensor.astra_grid_energy": [
+                {"state": 4784.3},
+                {"state": 4783.599},
+            ],
+            "sensor.astra_solar_energy": [
+                {"state": 748.839},
+                {"state": 763.589},
+            ],
+            "sensor.astra_total_energy": [
+                {"state": 5533.139},
+                {"state": 5547.188},
+            ],
+        }
+    ) == {
+        "sensor.astra_grid_energy": 4784.3,
+        "sensor.astra_solar_energy": 763.589,
+        "sensor.astra_total_energy": 5547.188,
+    }
+
+
 def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> None:
     provider = astra_api.AstraMeterReading(
         meter_id="meter",
