@@ -57,6 +57,7 @@ _BASELINE_STATISTIC_ATTRS = {
     "solar_energy": "solar_kwh_total",
     "total_energy": "total_kwh",
 }
+_MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 
 
 class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]):
@@ -285,8 +286,18 @@ def _baseline_reading_from_statistics(
     reading: AstraMeterReading, statistic_states: dict[str, float]
 ) -> AstraMeterReading | None:
     """Build a previous reading from recorder statistic states."""
+    grid_provider = reading.grid_kwh_total or reading.imported_kwh_total
     values = {
-        attr: statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS[channel]}")
+        attr: _plausible_baseline_value(
+            statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS[channel]}"),
+            (
+                grid_provider
+                if attr == "grid_kwh_total"
+                else reading.solar_kwh_total
+                if attr == "solar_kwh_total"
+                else reading.total_kwh
+            ),
+        )
         for channel, attr in _BASELINE_STATISTIC_ATTRS.items()
     }
     if all(value is None for value in values.values()):
@@ -302,3 +313,17 @@ def _baseline_reading_from_statistics(
         total_kwh=values["total_kwh"],
         raw={"source": "recorder_baseline"},
     )
+
+
+def _plausible_baseline_value(
+    baseline: float | None,
+    provider: float | None,
+) -> float | None:
+    """Return a startup baseline only when it is plausibly close to the provider."""
+    if baseline is None:
+        return None
+    if provider is None:
+        return baseline
+    if baseline - provider > _MAX_STARTUP_BASELINE_REPAIR_KWH:
+        return None
+    return baseline

@@ -1463,6 +1463,34 @@ def test_recorder_baseline_uses_maximum_state_when_latest_is_polluted() -> None:
     }
 
 
+def test_recorder_baseline_rejects_implausible_polluted_counter_jump() -> None:
+    provider = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978/0",
+        meter_name="Strom",
+        timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=4783.599,
+        grid_kwh_total=4783.599,
+        solar_kwh_total=763.589,
+        total_kwh=5547.188,
+    )
+    baseline = astra_coordinator._baseline_reading_from_statistics(
+        provider,
+        {
+            "sensor.astra_grid_energy": 4784.3,
+            "sensor.astra_solar_energy": 1109.27510315664,
+            "sensor.astra_total_energy": 5892.87410315664,
+        },
+    )
+
+    assert baseline is not None
+    repaired = astra_api.monotonic_reading(provider, baseline)
+
+    assert repaired.grid_kwh_total == pytest.approx(4784.3)
+    assert repaired.solar_kwh_total == pytest.approx(763.589)
+    assert repaired.total_kwh == pytest.approx(5547.889)
+
+
 def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> None:
     provider = astra_api.AstraMeterReading(
         meter_id="meter",
