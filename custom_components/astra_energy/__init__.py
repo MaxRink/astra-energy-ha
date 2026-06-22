@@ -162,7 +162,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     initial_refresh_task = hass.async_create_task(_async_background_initial_refresh(coordinator))
-    entry.async_on_unload(initial_refresh_task.cancel)
+
+    def _cancel_initial_refresh() -> None:
+        initial_refresh_task.cancel()
+
+    entry.async_on_unload(_cancel_initial_refresh)
 
     if not hass.services.has_service(DOMAIN, SERVICE_BACKFILL_HISTORY):
 
