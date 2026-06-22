@@ -156,6 +156,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="grid_cost_total_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="solar_energy_cost_total",
@@ -163,6 +164,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="solar_cost_total_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="total_energy_cost_total",
@@ -170,6 +172,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="total_cost_total_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_grid_energy",

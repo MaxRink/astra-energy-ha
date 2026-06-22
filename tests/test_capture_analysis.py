@@ -1296,7 +1296,7 @@ def test_diagnostic_and_live_cost_total_sensors_are_not_imported_to_recorder_sta
     assert "total_energy_cost_total" not in statistics.STATISTIC_CHANNELS
 
 
-def test_lifetime_cost_total_sensors_do_not_generate_recorder_statistics() -> None:
+def test_lifetime_cost_total_sensors_keep_state_class_for_existing_statistics() -> None:
     cost_descriptions = {
         description.key: description
         for description in astra_sensor.SENSOR_DESCRIPTIONS
@@ -1309,7 +1309,10 @@ def test_lifetime_cost_total_sensors_do_not_generate_recorder_statistics() -> No
         "solar_energy_cost_total",
         "total_energy_cost_total",
     }
-    assert all(description.state_class is None for description in cost_descriptions.values())
+    assert all(
+        description.state_class == astra_sensor.SensorStateClass.TOTAL
+        for description in cost_descriptions.values()
+    )
 
 
 def test_statistics_channels_include_historical_derived_metrics() -> None:
