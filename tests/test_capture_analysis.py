@@ -1613,6 +1613,19 @@ def test_statistics_channels_include_historical_derived_metrics() -> None:
         assert channel in statistics.STATISTIC_CHANNELS
 
 
+def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
+    channels = statistics._statistic_channels_for_granularity("quarter_hour")
+
+    assert "imported_energy" in channels
+    assert "solar_energy" in channels
+    assert "total_energy" in channels
+    assert "grid_price" in channels
+    assert "current_month_total_energy" not in channels
+    assert "current_month_total_cost" not in channels
+    assert "current_year_total_energy" not in channels
+    assert "current_year_total_cost" not in channels
+
+
 def test_period_and_measurement_statistics_are_state_only() -> None:
     assert not statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
     assert not statistics.STATISTIC_CHANNELS["current_year_total_energy"].has_sum

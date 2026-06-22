@@ -188,6 +188,19 @@ STATISTIC_CHANNELS = {
 }
 
 
+def _statistic_channels_for_granularity(
+    history_granularity: str,
+) -> dict[str, StatisticChannel]:
+    """Return channels that are valid for a backfill granularity."""
+    if history_granularity != HISTORY_GRANULARITY_QUARTER_HOUR:
+        return STATISTIC_CHANNELS
+    return {
+        channel: channel_def
+        for channel, channel_def in STATISTIC_CHANNELS.items()
+        if not channel.startswith(("current_month_", "current_year_"))
+    }
+
+
 def _sensor_statistic_id(reading: AstraMeterReading, channel: str) -> str:
     """Return the entity statistic id used by the energy sensor."""
     return f"sensor.{SENSOR_OBJECT_IDS[channel]}"
@@ -550,18 +563,19 @@ async def async_backfill_statistics(  # pragma: no cover
         )
         raise HomeAssistantError("Recorder statistics API is not available") from err
 
+    statistic_channels = _statistic_channels_for_granularity(history_granularity)
     statistic_ids = {
         _sensor_statistic_id(meter_readings[-1], channel)
         for meter_readings in grouped.values()
         if meter_readings
-        for channel in STATISTIC_CHANNELS
+        for channel in statistic_channels
     }
     statistic_starts = await _async_statistic_starts(hass, statistic_ids, start)
 
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
             continue
-        for channel, channel_def in STATISTIC_CHANNELS.items():
+        for channel, channel_def in statistic_channels.items():
             statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
             metadata = StatisticMetaData(
                 has_sum=channel_def.has_sum,
