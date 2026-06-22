@@ -709,6 +709,47 @@ def test_smoothing_falls_back_to_other_channel_then_equal_weights() -> None:
     ) == [0.5, 0.5]
 
 
+def test_single_channel_midnight_spike_does_not_weight_itself() -> None:
+    start = dt.datetime(2026, 6, 21, 0, 15, tzinfo=dt.UTC)
+    raw_points = [
+        {
+            "timestamp": start + dt.timedelta(minutes=15 * index),
+            "total_kwh": 0.0,
+            "solar_kwh": 0.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 0.0,
+            "unsmoothed_solar_kwh": 0.0,
+            "unsmoothed_grid_kwh": 0.0,
+        }
+        for index in range(96)
+    ]
+    raw_points.append(
+        {
+            "timestamp": start + dt.timedelta(minutes=15 * 96),
+            "total_kwh": 14.75,
+            "solar_kwh": 14.75,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 14.75,
+            "unsmoothed_solar_kwh": 14.75,
+            "unsmoothed_grid_kwh": 0.0,
+        }
+    )
+
+    sanitized, report = astra_api._sanitize_interval_points(
+        raw_points,
+        max_average_kw=50.0,
+        smooth_anomalies=True,
+        redistribution_window=96,
+        smoothing_lookaround_days=5,
+    )
+
+    assert report["total_kwh_redistributed"] == 1
+    assert report["solar_kwh_redistributed"] == 1
+    assert round(sum(point["solar_kwh"] for point in sanitized), 6) == 14.75
+    assert max(point["solar_kwh"] for point in sanitized) < 0.16
+    assert sanitized[-1]["unsmoothed_solar_kwh"] == 14.75
+
+
 def test_interval_sanitizer_rejects_negative_values() -> None:
     sanitized, report = astra_api._sanitize_interval_points(
         [

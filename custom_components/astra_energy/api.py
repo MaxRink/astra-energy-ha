@@ -543,6 +543,7 @@ def _redistribution_weights(
     *,
     key: str,
     lookaround_days: int,
+    exclude_weight_index: int | None = None,
 ) -> list[float]:
     """Return normalized weights for redistributing a delayed interval value."""
     if lookaround_days > 0:
@@ -551,7 +552,9 @@ def _redistribution_weights(
             timestamp = points[index]["timestamp"]
             local_timestamp = _provider_local_timestamp(timestamp)
             bucket_weight = 0.0
-            for other in points:
+            for other_index, other in enumerate(points):
+                if other_index == exclude_weight_index:
+                    continue
                 if other is points[index] or not other.get("valid", True):
                     continue
                 other_local = _provider_local_timestamp(other["timestamp"])
@@ -565,9 +568,15 @@ def _redistribution_weights(
             return [weight / total for weight in profile_weights]
     weights = []
     for index in indexes:
-        weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
+        if index == exclude_weight_index:
+            weight = 0.0
+        else:
+            weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
         weights.append(weight)
     if not any(weights):
+        if exclude_weight_index is not None and len(indexes) > 1:
+            share = 1.0 / (len(indexes) - 1)
+            return [0.0 if index == exclude_weight_index else share for index in indexes]
         return [1.0 / len(indexes)] * len(indexes)
     total = sum(weights)
     return [weight / total for weight in weights]
@@ -621,6 +630,7 @@ def _redistribute_interval_spikes(
             weight_keys,
             key=key,
             lookaround_days=smoothing_lookaround_days,
+            exclude_weight_index=index if hard_spike else None,
         )
         for target_index, weight in zip(indexes, weights, strict=False):
             points[target_index][key] = value * weight

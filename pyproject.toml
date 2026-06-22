@@ -1,6 +1,6 @@
 [project]
 name = "astra-energy-ha"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 description = "Home Assistant custom integration and API discovery tooling for Astra energy data"
 requires-python = ">=3.11"
 dependencies = []
