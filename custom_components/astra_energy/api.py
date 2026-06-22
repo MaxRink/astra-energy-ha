@@ -703,6 +703,59 @@ def _redistribute_delayed_interval_runs(
         index = run_end + 1
 
 
+def _enforce_interval_split_invariants(
+    points: list[dict[str, Any]],
+    report: dict[str, int],
+) -> None:
+    """Keep sanitized interval source splits physically possible."""
+    overflow = 0.0
+    spare_capacity: list[tuple[int, float]] = []
+    for index, point in enumerate(points):
+        if not point.get("valid", True):
+            continue
+        total = max(float(point.get("total_kwh") or 0.0), 0.0)
+        solar = max(float(point.get("solar_kwh") or 0.0), 0.0)
+        point["total_kwh"] = total
+        if solar > total:
+            overflow += solar - total
+            solar = total
+            point["solar_kwh"] = solar
+            report["solar_kwh_clamped_to_total"] = (
+                report.get("solar_kwh_clamped_to_total", 0) + 1
+            )
+        capacity = max(total - solar, 0.0)
+        if capacity > 0:
+            spare_capacity.append((index, capacity))
+
+    if overflow <= 0:
+        return
+
+    total_capacity = sum(capacity for _, capacity in spare_capacity)
+    if total_capacity <= 0:
+        report["solar_kwh_overflow_clipped"] = (
+            report.get("solar_kwh_overflow_clipped", 0) + 1
+        )
+        return
+
+    remaining = overflow
+    for index, capacity in spare_capacity:
+        share = min(capacity, overflow * capacity / total_capacity)
+        if share <= 0:
+            continue
+        points[index]["solar_kwh"] = float(points[index].get("solar_kwh") or 0.0) + share
+        remaining -= share
+    report["solar_kwh_overflow_reallocated"] = (
+        report.get("solar_kwh_overflow_reallocated", 0) + 1
+    )
+    report["solar_kwh_overflow_reallocated_buckets"] = (
+        report.get("solar_kwh_overflow_reallocated_buckets", 0) + len(spare_capacity)
+    )
+    if remaining > 0.000001:
+        report["solar_kwh_overflow_clipped"] = (
+            report.get("solar_kwh_overflow_clipped", 0) + 1
+        )
+
+
 def _sanitize_interval_points(
     points: list[dict[str, Any]],
     *,
@@ -748,15 +801,12 @@ def _sanitize_interval_points(
             smoothing_lookaround_days=smoothing_lookaround_days,
             report=report,
         )
+    _enforce_interval_split_invariants(sanitized, report)
     for point in sanitized:
         if not point.get("valid", True):
             continue
         total = max(float(point.get("total_kwh") or 0.0), 0.0)
         solar = max(float(point.get("solar_kwh") or 0.0), 0.0)
-        if solar > total:
-            solar = total
-            point["solar_kwh"] = solar
-            report["solar_kwh_clamped_to_total"] = report.get("solar_kwh_clamped_to_total", 0) + 1
         point["grid_kwh"] = max(total - solar, 0.0)
         if point["grid_kwh"] > max_interval_kwh:
             point["valid"] = False

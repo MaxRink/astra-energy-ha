@@ -802,6 +802,76 @@ def test_daily_interval_clamps_solar_to_total() -> None:
     assert points[0]["grid_kwh"] == 0.0
 
 
+def test_interval_sanitizer_reallocates_solar_overflow_without_export() -> None:
+    start = dt.datetime(2026, 6, 21, 0, 15, tzinfo=dt.UTC)
+    raw_points = [
+        {
+            "timestamp": start,
+            "total_kwh": 1.0,
+            "solar_kwh": 3.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 1.0,
+            "unsmoothed_solar_kwh": 3.0,
+            "unsmoothed_grid_kwh": 0.0,
+        },
+        {
+            "timestamp": start + dt.timedelta(minutes=15),
+            "total_kwh": 5.0,
+            "solar_kwh": 0.0,
+            "grid_kwh": 5.0,
+            "unsmoothed_total_kwh": 5.0,
+            "unsmoothed_solar_kwh": 0.0,
+            "unsmoothed_grid_kwh": 5.0,
+        },
+    ]
+
+    sanitized, report = astra_api._sanitize_interval_points(
+        raw_points,
+        max_average_kw=50.0,
+    )
+
+    assert report["solar_kwh_clamped_to_total"] == 1
+    assert report["solar_kwh_overflow_reallocated"] == 1
+    assert [point["solar_kwh"] for point in sanitized] == [1.0, 2.0]
+    assert [point["grid_kwh"] for point in sanitized] == [0.0, 3.0]
+    assert all(0.0 <= point["solar_kwh"] <= point["total_kwh"] for point in sanitized)
+
+
+def test_interval_sanitizer_clips_unallocatable_solar_overflow() -> None:
+    start = dt.datetime(2026, 6, 21, 0, 15, tzinfo=dt.UTC)
+    raw_points = [
+        {
+            "timestamp": start,
+            "total_kwh": 1.0,
+            "solar_kwh": 2.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 1.0,
+            "unsmoothed_solar_kwh": 2.0,
+            "unsmoothed_grid_kwh": 0.0,
+        },
+        {
+            "timestamp": start + dt.timedelta(minutes=15),
+            "total_kwh": 0.0,
+            "solar_kwh": 1.0,
+            "grid_kwh": 0.0,
+            "unsmoothed_total_kwh": 0.0,
+            "unsmoothed_solar_kwh": 1.0,
+            "unsmoothed_grid_kwh": 0.0,
+        },
+    ]
+
+    sanitized, report = astra_api._sanitize_interval_points(
+        raw_points,
+        max_average_kw=50.0,
+    )
+
+    assert report["solar_kwh_clamped_to_total"] == 2
+    assert report["solar_kwh_overflow_clipped"] == 1
+    assert [point["solar_kwh"] for point in sanitized] == [1.0, 0.0]
+    assert [point["grid_kwh"] for point in sanitized] == [0.0, 0.0]
+    assert all(0.0 <= point["solar_kwh"] <= point["total_kwh"] for point in sanitized)
+
+
 def test_overview_metrics_derive_grid_and_keep_raw_grid() -> None:
     metrics = astra_api._overview_metrics_from_payload(
         {
