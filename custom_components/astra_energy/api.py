@@ -154,6 +154,94 @@ def _cost_gross(kwh: float | None, price_gross: float | None) -> float | None:
     return round(kwh * price_gross, 4)
 
 
+def _max_present(*values: float | None) -> float | None:
+    """Return the maximum non-null provider value."""
+    present = [value for value in values if value is not None]
+    return max(present) if present else None
+
+
+def _reading_with_repriced_totals(reading: AstraMeterReading) -> AstraMeterReading:
+    """Recalculate dependent totals and costs after cumulative repair."""
+    grid_total = (
+        reading.grid_kwh_total
+        if reading.grid_kwh_total is not None
+        else reading.imported_kwh_total
+    )
+    grid_cost = _cost_gross(grid_total, reading.grid_price_gross_eur_per_kwh)
+    solar_cost = _cost_gross(
+        reading.solar_kwh_total, reading.solar_price_gross_eur_per_kwh
+    )
+    return replace(
+        reading,
+        imported_kwh_total=grid_total,
+        grid_cost_total_gross_eur=grid_cost,
+        solar_cost_total_gross_eur=solar_cost,
+        total_cost_total_gross_eur=_round_or_none(
+            (grid_cost or 0.0) + (solar_cost or 0.0),
+            4,
+        )
+        if grid_cost is not None or solar_cost is not None
+        else None,
+    )
+
+
+def monotonic_reading(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading | None,
+) -> AstraMeterReading:
+    """Return a cumulative reading that cannot roll back from a prior reading.
+
+    Astra can revise grid/solar splits after first publishing a day. Home
+    Assistant's Energy dashboard treats decreases in source counters as negative
+    consumption, so the public cumulative counters must stay monotonic. Raw
+    provider values remain visible through unsmoothed diagnostics and attributes.
+    """
+    grid = _max_present(
+        reading.grid_kwh_total,
+        reading.imported_kwh_total,
+        previous.grid_kwh_total if previous else None,
+        previous.imported_kwh_total if previous else None,
+    )
+    solar = _max_present(
+        reading.solar_kwh_total,
+        previous.solar_kwh_total if previous else None,
+    )
+    total_candidates = [
+        reading.total_kwh,
+        previous.total_kwh if previous else None,
+    ]
+    if grid is not None and solar is not None:
+        total_candidates.append(grid + solar)
+    total = _max_present(*total_candidates)
+
+    if (
+        grid == reading.grid_kwh_total
+        and solar == reading.solar_kwh_total
+        and total == reading.total_kwh
+    ):
+        return reading
+
+    repaired = replace(
+        reading,
+        imported_kwh_total=grid,
+        grid_kwh_total=grid,
+        solar_kwh_total=solar,
+        total_kwh=total,
+        raw={
+            **(reading.raw or {}),
+            "monotonic_repair": {
+                "provider_grid_kwh_total": reading.grid_kwh_total,
+                "provider_solar_kwh_total": reading.solar_kwh_total,
+                "provider_total_kwh": reading.total_kwh,
+                "previous_grid_kwh_total": previous.grid_kwh_total if previous else None,
+                "previous_solar_kwh_total": previous.solar_kwh_total if previous else None,
+                "previous_total_kwh": previous.total_kwh if previous else None,
+            },
+        },
+    )
+    return _reading_with_repriced_totals(repaired)
+
+
 def _parse_number(value: Any) -> float | None:
     """Parse German/English number strings into floats."""
     if value is None:

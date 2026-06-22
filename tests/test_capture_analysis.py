@@ -1315,6 +1315,64 @@ def test_lifetime_cost_total_sensors_keep_state_class_for_existing_statistics() 
     )
 
 
+def test_monotonic_reading_repairs_observed_provider_split_rollback() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 21, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=4784.3,
+        grid_kwh_total=4784.3,
+        solar_kwh_total=748.839,
+        total_kwh=5533.139,
+        grid_price_gross_eur_per_kwh=0.34986,
+        solar_price_gross_eur_per_kwh=0.2499,
+    )
+    provider = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=4783.599,
+        grid_kwh_total=4783.599,
+        solar_kwh_total=763.589,
+        total_kwh=5547.188,
+        grid_price_gross_eur_per_kwh=0.34986,
+        solar_price_gross_eur_per_kwh=0.2499,
+        raw={"action": "get_mtr_lzs"},
+    )
+
+    repaired = astra_api.monotonic_reading(provider, previous)
+
+    assert repaired.grid_kwh_total == 4784.3
+    assert repaired.imported_kwh_total == 4784.3
+    assert repaired.solar_kwh_total == 763.589
+    assert repaired.total_kwh == 5547.889
+    assert repaired.grid_cost_total_gross_eur == 1673.8352
+    assert repaired.solar_cost_total_gross_eur == 190.8209
+    assert repaired.total_cost_total_gross_eur == 1864.6561
+    assert repaired.raw["monotonic_repair"]["provider_grid_kwh_total"] == 4783.599
+
+
+def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> None:
+    provider = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=10.0,
+        grid_kwh_total=10.0,
+        solar_kwh_total=5.0,
+        total_kwh=14.0,
+    )
+
+    repaired = astra_api.monotonic_reading(provider, None)
+
+    assert repaired.grid_kwh_total == 10.0
+    assert repaired.solar_kwh_total == 5.0
+    assert repaired.total_kwh == 15.0
+
+
 def test_statistics_channels_include_historical_derived_metrics() -> None:
     for channel in {
         "raw_grid_energy",

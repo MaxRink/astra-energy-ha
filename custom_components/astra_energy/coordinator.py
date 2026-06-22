@@ -10,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import AstraApiError, AstraAuthError, AstraClient, AstraMeterReading
+from .api import (
+    AstraApiError,
+    AstraAuthError,
+    AstraClient,
+    AstraMeterReading,
+    monotonic_reading,
+)
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     CONF_GRID_PRICE_NET,
@@ -143,7 +149,13 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         await self._async_update_web_session_status()
         await async_delete_issue(self.hass, ISSUE_API_AUTH)
         await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
-        return {reading.meter_id: reading for reading in readings}
+        return {
+            reading.meter_id: monotonic_reading(
+                reading,
+                self.data.get(reading.meter_id) if self.data else None,
+            )
+            for reading in readings
+        }
 
     async def _async_update_web_session_status(self) -> None:
         """Check the optional manual browser session and publish diagnostics."""
