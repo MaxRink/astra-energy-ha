@@ -52,10 +52,14 @@ from .web_session import async_check_web_session
 
 _LOGGER = logging.getLogger(__name__)
 
-_BASELINE_STATISTIC_ATTRS = {
+_BASELINE_ENERGY_STATISTIC_ATTRS = {
     "imported_energy": "grid_kwh_total",
     "solar_energy": "solar_kwh_total",
     "total_energy": "total_kwh",
+}
+_BASELINE_COST_STATISTIC_ATTRS = {
+    "grid_energy_cost_total": "grid_kwh_total",
+    "solar_energy_cost_total": "solar_kwh_total",
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 
@@ -177,7 +181,10 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         self._recorder_baselines_loaded = True
         statistic_ids = {
             f"sensor.{SENSOR_OBJECT_IDS[channel]}"
-            for channel in _BASELINE_STATISTIC_ATTRS
+            for channel in _BASELINE_ENERGY_STATISTIC_ATTRS
+        } | {
+            f"sensor.{SENSOR_OBJECT_IDS[channel]}"
+            for channel in _BASELINE_COST_STATISTIC_ATTRS
         }
         baselines = await _async_recorder_baseline_states(self.hass, statistic_ids)
         if not baselines:
@@ -287,9 +294,14 @@ def _baseline_reading_from_statistics(
 ) -> AstraMeterReading | None:
     """Build a previous reading from recorder statistic states."""
     grid_provider = reading.grid_kwh_total or reading.imported_kwh_total
+    energy_values = {
+        attr: statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS[channel]}")
+        for channel, attr in _BASELINE_ENERGY_STATISTIC_ATTRS.items()
+    }
+    cost_derived_values = _cost_derived_baselines(reading, statistic_states)
     values = {
-        attr: _plausible_baseline_value(
-            statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS[channel]}"),
+        attr: _best_plausible_baseline_value(
+            (energy_values.get(attr), cost_derived_values.get(attr)),
             (
                 grid_provider
                 if attr == "grid_kwh_total"
@@ -298,7 +310,7 @@ def _baseline_reading_from_statistics(
                 else reading.total_kwh
             ),
         )
-        for channel, attr in _BASELINE_STATISTIC_ATTRS.items()
+        for attr in _BASELINE_ENERGY_STATISTIC_ATTRS.values()
     }
     if all(value is None for value in values.values()):
         return None
@@ -313,6 +325,36 @@ def _baseline_reading_from_statistics(
         total_kwh=values["total_kwh"],
         raw={"source": "recorder_baseline"},
     )
+
+
+def _cost_derived_baselines(
+    reading: AstraMeterReading, statistic_states: dict[str, float]
+) -> dict[str, float]:
+    """Derive energy baselines from lifetime cost statistics and current prices."""
+    values = {}
+    price_by_attr = {
+        "grid_kwh_total": reading.grid_price_gross_eur_per_kwh,
+        "solar_kwh_total": reading.solar_price_gross_eur_per_kwh,
+    }
+    for channel, attr in _BASELINE_COST_STATISTIC_ATTRS.items():
+        price = price_by_attr.get(attr)
+        cost = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS[channel]}")
+        if price is not None and price > 0 and cost is not None:
+            values[attr] = cost / price
+    return values
+
+
+def _best_plausible_baseline_value(
+    candidates: tuple[float | None, ...],
+    provider: float | None,
+) -> float | None:
+    """Return the highest candidate that is plausible relative to the provider."""
+    plausible = [
+        value
+        for value in (_plausible_baseline_value(candidate, provider) for candidate in candidates)
+        if value is not None
+    ]
+    return max(plausible) if plausible else None
 
 
 def _plausible_baseline_value(
