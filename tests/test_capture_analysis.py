@@ -154,6 +154,7 @@ assert sensor_spec and sensor_spec.loader
 astra_sensor = importlib.util.module_from_spec(sensor_spec)
 sys.modules[sensor_spec.name] = astra_sensor
 sensor_spec.loader.exec_module(astra_sensor)
+astra_coordinator = sys.modules["custom_components.astra_energy.coordinator"]
 
 
 def test_endpoint_key_strips_query() -> None:
@@ -1393,6 +1394,50 @@ def test_monotonic_reading_repairs_observed_provider_split_rollback() -> None:
     assert repaired.solar_cost_total_gross_eur == 190.8209
     assert repaired.total_cost_total_gross_eur == 1864.6561
     assert repaired.raw["monotonic_repair"]["provider_grid_kwh_total"] == 4783.599
+
+
+def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
+    provider = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978/0",
+        meter_name="Strom",
+        timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=4783.599,
+        grid_kwh_total=4783.599,
+        solar_kwh_total=763.589,
+        total_kwh=5547.188,
+        grid_price_gross_eur_per_kwh=0.34986,
+        solar_price_gross_eur_per_kwh=0.2499,
+    )
+    baseline = astra_coordinator._baseline_reading_from_statistics(
+        provider,
+        {
+            "sensor.astra_grid_energy": 4784.3,
+            "sensor.astra_solar_energy": 748.839,
+            "sensor.astra_total_energy": 5533.139,
+        },
+    )
+
+    assert baseline is not None
+    repaired = astra_api.monotonic_reading(provider, baseline)
+
+    assert repaired.grid_kwh_total == pytest.approx(4784.3)
+    assert repaired.solar_kwh_total == pytest.approx(763.589)
+    assert repaired.total_kwh == pytest.approx(5547.889)
+    assert repaired.raw["monotonic_repair"]["provider_grid_kwh_total"] == 4783.599
+    assert repaired.raw["monotonic_repair"]["previous_grid_kwh_total"] == 4784.3
+
+
+def test_recorder_baseline_returns_none_without_statistics() -> None:
+    reading = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978/0",
+        meter_name="Strom",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=None,
+    )
+
+    assert astra_coordinator._baseline_reading_from_statistics(reading, {}) is None
 
 
 def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> None:
