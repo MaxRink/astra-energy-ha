@@ -1165,8 +1165,8 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
         "grid_kwh_total",
     )
 
-    assert [row["state"] for row in rows] == [200.0]
-    assert [row["sum"] for row in rows] == [0.0]
+    assert [row["state"] for row in rows] == [200.0, 200.0, 200.0]
+    assert [row["sum"] for row in rows] == [0.0, 0.0, 0.0]
 
 
 def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
@@ -1194,7 +1194,13 @@ def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
         sum_start=899.0,
     )
 
-    assert rows == []
+    assert rows == [
+        {
+            "start": dt.datetime(2026, 6, 21, 17, 0, tzinfo=dt.UTC),
+            "state": 899.0,
+            "sum": 899.0,
+        }
+    ]
 
 
 def test_statistics_rows_skip_implausible_hourly_jump() -> None:
@@ -1229,8 +1235,48 @@ def test_statistics_rows_skip_implausible_hourly_jump() -> None:
         max_hourly_delta=50.0,
     )
 
-    assert [row["state"] for row in rows] == [1000.0, 1001.0]
-    assert [row["sum"] for row in rows] == [0.0, 1.0]
+    assert [row["state"] for row in rows] == [1000.0, 1000.0, 1001.0]
+    assert [row["sum"] for row in rows] == [0.0, 0.0, 1.0]
+
+
+def test_statistics_rows_flatten_provider_rollback_to_repair_existing_spike() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 22, 14, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                solar_kwh_total=1109.27510315664,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 22, 15, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=None,
+                solar_kwh_total=763.589,
+            ),
+        ],
+        "solar_kwh_total",
+        sum_start=1109.2751031566356,
+        state_start=1109.2751031566356,
+        max_hourly_delta=50.0,
+    )
+
+    assert rows == [
+        {
+            "start": dt.datetime(2026, 6, 22, 14, 0, tzinfo=dt.UTC),
+            "state": pytest.approx(1109.27510315664),
+            "sum": pytest.approx(1109.2751031566356),
+        },
+        {
+            "start": dt.datetime(2026, 6, 22, 15, 0, tzinfo=dt.UTC),
+            "state": pytest.approx(1109.27510315664),
+            "sum": pytest.approx(1109.2751031566356),
+        },
+    ]
 
 
 def test_statistics_rows_skip_missing_timestamp_or_value() -> None:
@@ -1568,8 +1614,8 @@ def test_statistics_channels_include_historical_derived_metrics() -> None:
 
 
 def test_period_and_measurement_statistics_are_state_only() -> None:
-    assert statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
-    assert statistics.STATISTIC_CHANNELS["current_month_total_energy"].allow_reset
+    assert not statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
+    assert not statistics.STATISTIC_CHANNELS["current_year_total_energy"].has_sum
     assert not statistics.STATISTIC_CHANNELS["current_year_total_cost"].has_sum
     assert not statistics.STATISTIC_CHANNELS["grid_price"].has_sum
     assert statistics.STATISTIC_CHANNELS["grid_price"].has_mean

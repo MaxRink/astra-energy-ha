@@ -121,43 +121,43 @@ STATISTIC_CHANNELS = {
         "current_month_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_month_solar_energy": StatisticChannel(
         "current_month_solar_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_month_total_energy": StatisticChannel(
         "current_month_total_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_year_grid_energy": StatisticChannel(
         "current_year_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_year_solar_energy": StatisticChannel(
         "current_year_solar_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_year_total_energy": StatisticChannel(
         "current_year_total_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "current_year_raw_grid_energy": StatisticChannel(
         "current_year_raw_grid_kwh",
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
-        allow_reset=True,
+        has_sum=False,
     ),
     "grid_price": StatisticChannel(
         "grid_price_gross_eur_per_kwh",
@@ -246,6 +246,12 @@ def _statistics_rows(
                         "sum": current_sum,
                     }
                     continue
+                rows_by_start[start] = {
+                    "start": start,
+                    "state": previous_total,
+                    "sum": current_sum,
+                }
+                previous_timestamp = timestamp
                 _LOGGER.warning(
                     "Skipping Astra statistic rollback attr=%s start=%s previous=%s current=%s",
                     value_attr,
@@ -260,6 +266,12 @@ def _statistics_rows(
                     0.25,
                 )
                 if delta > max_hourly_delta * elapsed_hours:
+                    rows_by_start[start] = {
+                        "start": start,
+                        "state": previous_total,
+                        "sum": current_sum,
+                    }
+                    previous_timestamp = timestamp
                     _LOGGER.warning(
                         "Skipping Astra statistic spike attr=%s start=%s delta=%s limit=%s",
                         value_attr,
