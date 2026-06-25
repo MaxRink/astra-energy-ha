@@ -181,7 +181,8 @@ inspection.
 
 Quarter-hour payloads are cached in Home Assistant storage after the first
 successful fetch. Later imports reuse cached old days and only re-fetch the
-recent overlap window so Astra is not hammered for immutable history. The
+recent overlap window, four days by default, so Astra is not hammered for
+immutable history. The
 importer also rejects impossible negative or spike values before writing
 recorder statistics. Recorder imports also skip cumulative rollbacks and
 implausible hourly jumps so a bad provider value cannot create negative

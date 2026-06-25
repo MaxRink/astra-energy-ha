@@ -15,7 +15,10 @@ from .api import (
     AstraApiError,
     AstraAuthError,
     AstraClient,
+    AstraDeferredDataError,
     AstraMeterReading,
+    _cost_gross,
+    _round_or_none,
     monotonic_reading,
 )
 from .const import (
@@ -139,6 +142,15 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 ),
             )
             raise ConfigEntryAuthFailed(str(err)) from err
+        except AstraDeferredDataError as err:
+            self.api_status = "deferred"
+            self.last_error = error_payload(err)
+            await self._async_update_web_session_status()
+            await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
+            _LOGGER.warning("Astra Energy update deferred: %s", err)
+            if self.data:
+                return self.data
+            return await self._async_recorder_fallback_readings()
         except AstraApiError as err:
             self.api_status = "error"
             self.last_error = error_payload(err)
@@ -195,6 +207,32 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             if baseline is not None:
                 baseline_readings[reading.meter_id] = baseline
         return baseline_readings
+
+    async def _async_recorder_fallback_readings(self) -> dict[str, AstraMeterReading]:
+        """Return recorder-backed readings when Astra defers during startup."""
+        if self._recorder_baselines_loaded:
+            return {}
+        self._recorder_baselines_loaded = True
+        meter_id = _meter_id_from_entity_registry(self.hass)
+        if meter_id is None:
+            return {}
+        statistic_ids = {
+            f"sensor.{SENSOR_OBJECT_IDS[channel]}"
+            for channel in _BASELINE_ENERGY_STATISTIC_ATTRS
+        } | {
+            f"sensor.{SENSOR_OBJECT_IDS[channel]}"
+            for channel in _BASELINE_COST_STATISTIC_ATTRS
+        }
+        baselines = await _async_recorder_baseline_states(self.hass, statistic_ids)
+        fallback = _recorder_fallback_reading_from_statistics(
+            meter_id,
+            baselines,
+            self.config_entry.options,
+        )
+        if fallback is None:
+            return {}
+        self.last_successful_source = "recorder"
+        return {fallback.meter_id: fallback}
 
     async def _async_update_web_session_status(self) -> None:
         """Check the optional manual browser session and publish diagnostics."""
@@ -287,6 +325,87 @@ def _max_statistic_states(rows_by_statistic_id: dict[str, list[dict]]) -> dict[s
         if present_states:
             states[statistic_id] = max(present_states)
     return states
+
+
+def _meter_id_from_entity_registry(hass: HomeAssistant) -> str | None:
+    """Return the existing Astra meter ID from the entity registry."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return None
+    registry = er.async_get(hass)
+    entity = registry.async_get(f"sensor.{SENSOR_OBJECT_IDS['imported_energy']}")
+    unique_id = getattr(entity, "unique_id", None) if entity is not None else None
+    prefix = f"{DOMAIN}_"
+    suffix = "_imported_energy"
+    if not unique_id or not unique_id.startswith(prefix) or not unique_id.endswith(suffix):
+        return None
+    meter_id = unique_id[len(prefix) : -len(suffix)]
+    return meter_id or None
+
+
+def _recorder_fallback_reading_from_statistics(
+    meter_id: str,
+    statistic_states: dict[str, float],
+    options: dict,
+) -> AstraMeterReading | None:
+    """Build one stable reading from recorder statistics during provider deferrals."""
+    grid = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS['imported_energy']}")
+    solar = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS['solar_energy']}")
+    total = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS['total_energy']}")
+    if total is None and (grid is not None or solar is not None):
+        total = (grid or 0.0) + (solar or 0.0)
+    if grid is None and total is not None and solar is not None:
+        grid = max(total - solar, 0.0)
+    if grid is not None and total is not None:
+        plausible_solar = max(total - grid, 0.0)
+        if solar is None or solar - plausible_solar > _MAX_STARTUP_BASELINE_REPAIR_KWH:
+            solar = plausible_solar
+    if solar is not None and total is not None:
+        plausible_grid = max(total - solar, 0.0)
+        if grid is None or grid - plausible_grid > _MAX_STARTUP_BASELINE_REPAIR_KWH:
+            grid = plausible_grid
+    if all(value is None for value in (grid, solar, total)):
+        return None
+
+    grid_price_net = float(options.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET))
+    solar_price_net = float(options.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET))
+    tax_rate = float(options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE))
+    grid_price_gross = _round_or_none(grid_price_net * (1 + tax_rate))
+    solar_price_gross = _round_or_none(solar_price_net * (1 + tax_rate))
+    grid_cost = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS['grid_energy_cost_total']}")
+    solar_cost = statistic_states.get(f"sensor.{SENSOR_OBJECT_IDS['solar_energy_cost_total']}")
+    if grid_cost is None:
+        grid_cost = _cost_gross(grid, grid_price_gross)
+    if solar_cost is None:
+        solar_cost = _cost_gross(solar, solar_price_gross)
+    total_cost = (
+        _round_or_none((grid_cost or 0.0) + (solar_cost or 0.0), 4)
+        if grid_cost is not None or solar_cost is not None
+        else None
+    )
+    return AstraMeterReading(
+        meter_id=meter_id,
+        meter_name="Astra Energy Meter",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=grid,
+        grid_kwh_total=grid,
+        solar_kwh_total=solar,
+        total_kwh=total,
+        unsmoothed_grid_kwh_total=grid,
+        unsmoothed_solar_kwh_total=solar,
+        unsmoothed_total_kwh=total,
+        grid_price_net_eur_per_kwh=grid_price_net,
+        grid_price_gross_eur_per_kwh=grid_price_gross,
+        solar_price_net_eur_per_kwh=solar_price_net,
+        solar_price_gross_eur_per_kwh=solar_price_gross,
+        tax_rate=tax_rate,
+        grid_cost_total_gross_eur=grid_cost,
+        solar_cost_total_gross_eur=solar_cost,
+        total_cost_total_gross_eur=total_cost,
+        raw={"source": "recorder_fallback"},
+    )
 
 
 def _baseline_reading_from_statistics(

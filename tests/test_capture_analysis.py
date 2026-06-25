@@ -50,6 +50,12 @@ class StubDataUpdateCoordinator:
     def __class_getitem__(cls, _item):
         return cls
 
+    def __init__(self, *args, **kwargs):
+        self.hass = kwargs.get("hass")
+        self.config_entry = kwargs.get("config_entry")
+        self.update_interval = kwargs.get("update_interval")
+        self.data = None
+
 
 class StubCoordinatorEntity:
     @classmethod
@@ -751,6 +757,535 @@ def test_single_channel_midnight_spike_does_not_weight_itself() -> None:
     assert sanitized[-1]["unsmoothed_solar_kwh"] == 14.75
 
 
+def test_captured_interval_catchup_does_not_weight_itself() -> None:
+    payload_path = Path(__file__).parents[1] / "captures" / "astra-raw-15min-2026-06-19.json"
+    payload = json.loads(payload_path.read_text())["actions"]["get_mtr_eb"]["payload"]
+    raw_points, raw_report = astra_api._daily_interval_raw_values_from_payload(
+        payload,
+        dt.date(2026, 6, 19),
+    )
+
+    assert raw_report == {}
+    assert max(point["total_kwh"] for point in raw_points) == pytest.approx(10.631)
+
+    sanitized, report = astra_api._sanitize_interval_points(
+        raw_points,
+        max_average_kw=50.0,
+        smooth_anomalies=True,
+        redistribution_window=96,
+        smoothing_lookaround_days=5,
+    )
+
+    assert report["total_kwh_catchup_redistributed"] == 1
+    assert report["solar_kwh_catchup_redistributed"] == 1
+    assert max(point["total_kwh"] for point in sanitized) < 3.0
+    assert max(point["solar_kwh"] for point in sanitized) < 1.5
+    assert round(sum(point["total_kwh"] for point in sanitized), 6) == round(
+        sum(point["unsmoothed_total_kwh"] for point in sanitized),
+        6,
+    )
+
+
+def test_interval_history_skips_failed_days() -> None:
+    payload = {
+        "auth": "1",
+        "data": [
+            {
+                "_lvb_lbl_14h": "00:15,00:30",
+                "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                "_lvb_vll_14h": "0.25,0.25;0.25,0.25;0.0,0.0;0.0,0.0;0.0,0.0",
+            }
+        ],
+    }
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+
+    async def fake_latest():
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=100.5,
+                grid_kwh_total=100.5,
+                solar_kwh_total=0.0,
+                total_kwh=100.5,
+            )
+        ]
+
+    async def fake_get_json(_action, **params):
+        if params["s_datum"] == "2026-06-19":
+            raise astra_api.AstraProtocolError("Astra response is too short")
+        return payload
+
+    client._read_latest_meter_stands = fake_latest
+    client._get_json = fake_get_json
+
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 20, 0, 30, tzinfo=dt.UTC),
+        )
+    )
+
+    assert [reading.timestamp for reading in readings] == [
+        dt.datetime(2026, 6, 19, 22, 15, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.UTC),
+    ]
+    assert readings[-1].total_kwh == 100.5
+
+
+def test_interval_history_uses_cached_day_when_fetch_fails() -> None:
+    payload = {
+        "auth": "1",
+        "data": [
+            {
+                "_lvb_lbl_14h": "00:15,00:30",
+                "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                "_lvb_vll_14h": "0.25,0.25;0.25,0.25;0.0,0.0;0.0,0.0;0.0,0.0",
+            }
+        ],
+    }
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+
+    async def fake_latest():
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=100.5,
+                grid_kwh_total=100.5,
+                solar_kwh_total=0.0,
+                total_kwh=100.5,
+            )
+        ]
+
+    async def provider_empty_for_cached_day(_action, **params):
+        if params["s_datum"] == "2026-06-20":
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+        return {"auth": "1", "data": []}
+
+    client._read_latest_meter_stands = fake_latest
+    client._get_json = provider_empty_for_cached_day
+
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 20, 0, 30, tzinfo=dt.UTC),
+            payload_cache={"2026-06-20": payload},
+        )
+    )
+
+    assert [reading.timestamp for reading in readings] == [
+        dt.datetime(2026, 6, 19, 22, 15, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.UTC),
+    ]
+    assert [reading.total_kwh for reading in readings] == [100.25, 100.5]
+
+
+def test_interval_history_defers_without_cumulative_baseline() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+
+    async def latest_failed():
+        raise astra_api.AstraProtocolError("Astra response is too short")
+
+    async def monthly_failed(_start, _end):
+        raise astra_api.AstraProtocolError("Astra response is too short")
+
+    async def should_not_fetch_intervals(_action, **_params):
+        raise AssertionError("interval data must not be fetched without a baseline")
+
+    client._read_latest_meter_stands = latest_failed
+    client.async_get_historical_meter_stands = monthly_failed
+    client._get_json = should_not_fetch_intervals
+
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 20, 0, 30, tzinfo=dt.UTC),
+        )
+    )
+
+    assert readings == []
+
+
+def test_interval_history_can_start_from_recorder_baseline() -> None:
+    payload = {
+        "auth": "1",
+        "data": [
+            {
+                "_lvb_lbl_14h": "00:15,00:30",
+                "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                "_lvb_vll_14h": "0.25,0.25;0.20,0.20;0.05,0.05;0.05,0.05;0.0,0.0",
+            }
+        ],
+    }
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+
+    async def latest_failed():
+        raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def monthly_failed(_start, _end):
+        raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def interval_payload(_action, **_params):
+        return payload
+
+    client._read_latest_meter_stands = latest_failed
+    client.async_get_historical_meter_stands = monthly_failed
+    client._get_json = interval_payload
+
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 18, 22, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 19, 0, 30, tzinfo=dt.UTC),
+            start_baseline=astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 18, 22, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=100.0,
+                grid_kwh_total=100.0,
+                solar_kwh_total=20.0,
+                total_kwh=120.0,
+            ),
+        )
+    )
+
+    assert [reading.timestamp for reading in readings] == [
+        dt.datetime(2026, 6, 18, 22, 15, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 18, 22, 30, tzinfo=dt.UTC),
+    ]
+    assert [reading.grid_kwh_total for reading in readings] == [100.2, 100.4]
+    assert [reading.solar_kwh_total for reading in readings] == [20.05, 20.1]
+    assert [reading.total_kwh for reading in readings] == [120.25, 120.5]
+
+
+def test_interval_history_cached_baseline_does_not_require_login() -> None:
+    payload = {
+        "auth": "1",
+        "data": [
+            {
+                "_lvb_lbl_14h": "00:15",
+                "_lvb_ttl": "Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug",
+                "_lvb_vll_14h": "0.25;0.20;0.05;0.05;0.0",
+            }
+        ],
+    }
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = False
+
+    async def login_failed():
+        raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def should_not_fetch(_action, **_params):
+        raise AssertionError("cached baseline recovery must not hit the provider")
+
+    client.async_login = login_failed
+    client._get_json = should_not_fetch
+
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 18, 22, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 19, 0, 30, tzinfo=dt.UTC),
+            start_baseline=astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 18, 22, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=100.0,
+                grid_kwh_total=100.0,
+                solar_kwh_total=20.0,
+                total_kwh=120.0,
+            ),
+            payload_cache={"2026-06-18": payload, "2026-06-19": payload},
+            cache_before=dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.UTC),
+        )
+    )
+
+    assert len(readings) == 1
+    assert readings[0].grid_kwh_total == 100.2
+    assert readings[0].solar_kwh_total == 20.05
+    assert readings[0].total_kwh == 120.25
+
+
+def test_historical_backfill_deferred_error_does_not_create_repair_issue(monkeypatch) -> None:
+    calls = []
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class Client:
+        async def async_get_historical_meter_stands(self, _start, _end):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    coordinator = types.SimpleNamespace(
+        client=Client(),
+        config_entry=types.SimpleNamespace(options={}),
+    )
+
+    monkeypatch.setattr(statistics, "async_create_issue", create_issue)
+    monkeypatch.setattr(statistics, "async_delete_issue", delete_issue)
+
+    result = asyncio.run(
+        statistics.async_backfill_statistics(
+            object(),
+            coordinator,
+            days=1,
+            recent_refresh_hours=0,
+            history_granularity=statistics.HISTORY_GRANULARITY_MONTHLY,
+            import_statistics=True,
+        )
+    )
+
+    assert result == {}
+    assert [call[0] for call in calls] == ["delete"]
+    assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
+
+
+def test_historical_backfill_non_deferred_error_keeps_repair_issue(monkeypatch) -> None:
+    calls = []
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class Client:
+        async def async_get_historical_meter_stands(self, _start, _end):
+            raise astra_api.AstraApiError("network down")
+
+    coordinator = types.SimpleNamespace(
+        client=Client(),
+        config_entry=types.SimpleNamespace(options={}),
+    )
+
+    monkeypatch.setattr(statistics, "async_create_issue", create_issue)
+    monkeypatch.setattr(statistics, "async_delete_issue", delete_issue)
+
+    result = asyncio.run(
+        statistics.async_backfill_statistics(
+            object(),
+            coordinator,
+            days=1,
+            recent_refresh_hours=0,
+            history_granularity=statistics.HISTORY_GRANULARITY_MONTHLY,
+            import_statistics=True,
+        )
+    )
+
+    assert result == {}
+    assert [call[0] for call in calls] == ["create"]
+    assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
+
+
+def test_coordinator_deferred_update_does_not_create_repair_issue(monkeypatch) -> None:
+    calls = []
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(options={}),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result == {}
+    assert coordinator.api_status == "deferred"
+    assert [call[0] for call in calls] == ["delete"]
+    assert calls[0][1][1] == astra_coordinator.ISSUE_API_UNAVAILABLE
+
+
+def test_coordinator_deferred_update_checks_web_session_status(monkeypatch) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(options={}),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+    calls = []
+
+    async def web_status():
+        calls.append("web")
+        coordinator.web_session_status = {"status": "ok"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    assert asyncio.run(coordinator._async_update_data()) == {}
+    assert calls == ["web"]
+    assert coordinator.web_session_status == {"status": "ok"}
+
+
+def test_coordinator_deferred_startup_uses_recorder_fallback(monkeypatch) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def recorder_states(_hass, statistic_ids):
+        assert "sensor.astra_grid_energy" in statistic_ids
+        return {
+            "sensor.astra_grid_energy": 4818.731,
+            "sensor.astra_solar_energy": 1059.83525104396,
+            "sensor.astra_total_energy": 5608.202,
+            "sensor.astra_grid_energy_cost_total": 1686.0,
+        }
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_meter_id_from_entity_registry",
+        lambda _hass: "1EBZ0103002978_0",
+    )
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_async_recorder_baseline_states",
+        recorder_states,
+    )
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_GRID_PRICE_NET: 0.294,
+                astra_coordinator.CONF_SOLAR_PRICE_NET: 0.21,
+                astra_coordinator.CONF_TAX_RATE: 0.19,
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+    reading = result["1EBZ0103002978_0"]
+
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_successful_source == "recorder"
+    assert reading.grid_kwh_total == 4818.731
+    assert reading.solar_kwh_total == pytest.approx(789.471)
+    assert reading.total_kwh == 5608.202
+    assert reading.grid_cost_total_gross_eur == 1686.0
+    assert reading.solar_cost_total_gross_eur == pytest.approx(197.2888)
+
+
+def test_coordinator_non_deferred_update_keeps_repair_issue(monkeypatch) -> None:
+    calls = []
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraApiError("network down")
+
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(options={}),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    with pytest.raises(RuntimeError, match="network down"):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.api_status == "error"
+    assert [call[0] for call in calls] == ["create"]
+    assert calls[0][1][1] == astra_coordinator.ISSUE_API_UNAVAILABLE
+
+
 def test_interval_sanitizer_rejects_negative_values() -> None:
     sanitized, report = astra_api._sanitize_interval_points(
         [
@@ -1237,6 +1772,181 @@ def test_statistics_rows_apply_sum_offset_without_changing_state() -> None:
     ]
 
 
+def test_statistic_import_start_uses_first_aligned_bucket() -> None:
+    readings = [
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4816.99,
+            grid_kwh_total=4816.99,
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 24, 20, 15, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4817.2,
+            grid_kwh_total=4817.2,
+        ),
+    ]
+
+    assert statistics._statistic_import_start(
+        readings,
+        "grid_kwh_total",
+        align_to_hour=True,
+    ) == dt.datetime(2026, 6, 24, 19, 0, tzinfo=dt.UTC)
+    assert statistics._statistic_import_end(
+        readings,
+        "grid_kwh_total",
+        align_to_hour=True,
+    ) == dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC)
+
+
+def test_statistic_start_for_sum_channel_skips_null_sum_rows() -> None:
+    rows = [
+        {
+            "start": dt.datetime(2026, 6, 24, 17, 0, tzinfo=dt.UTC),
+            "state": 4815.742,
+            "sum": 4275.496384846102,
+        },
+        {
+            "start": dt.datetime(2026, 6, 24, 18, 0, tzinfo=dt.UTC),
+            "state": 4815.742,
+            "sum": None,
+        },
+    ]
+
+    assert statistics._statistic_start_from_rows(rows, require_sum=True) == {
+        "state": 4815.742,
+        "sum": 4275.496384846102,
+        "start": dt.datetime(2026, 6, 24, 17, 0, tzinfo=dt.UTC),
+    }
+    assert statistics._statistic_start_from_rows(rows, require_sum=False) == {
+        "state": 4815.742,
+        "start": dt.datetime(2026, 6, 24, 18, 0, tzinfo=dt.UTC),
+    }
+
+
+def test_readings_after_existing_start_rebases_to_recorder_state() -> None:
+    readings = [
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4812.0,
+            grid_kwh_total=4812.0,
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4813.5,
+            grid_kwh_total=4813.5,
+        ),
+    ]
+
+    rebased = statistics._readings_after_existing_start(
+        readings,
+        "grid_kwh_total",
+        existing_start=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+        existing_state=4818.731,
+        align_to_hour=True,
+    )
+
+    assert len(rebased) == 1
+    assert rebased[0].timestamp == dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC)
+    assert rebased[0].grid_kwh_total == pytest.approx(4820.231)
+    assert readings[1].grid_kwh_total == 4813.5
+
+
+def test_interval_start_baseline_uses_recorder_without_fresh_coordinator_data(monkeypatch) -> None:
+    async def statistic_starts(_hass, _statistic_ids, _start, *, require_sum=False):
+        assert require_sum is False
+        return {
+            "sensor.astra_grid_energy": {
+                "state": 4772.637,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+            "sensor.astra_solar_energy": {
+                "state": 762.957,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+            "sensor.astra_total_energy": {
+                "state": 5535.594,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+        }
+
+    monkeypatch.setattr(statistics, "_async_statistic_starts", statistic_starts)
+    monkeypatch.setattr(statistics, "_meter_id_from_entity_registry", lambda _hass: "meter_1")
+    coordinator = types.SimpleNamespace(
+        data={},
+        config_entry=types.SimpleNamespace(options={}),
+    )
+
+    baseline = asyncio.run(
+        statistics._async_interval_start_baseline(
+            object(),
+            coordinator,
+            dt.datetime(2026, 6, 20, 18, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 25, 16, 0, tzinfo=dt.UTC),
+        )
+    )
+
+    assert baseline is not None
+    assert baseline.meter_id == "meter_1"
+    assert baseline.timestamp == dt.datetime(2026, 6, 21, 0, 0, tzinfo=dt.UTC)
+    assert baseline.grid_kwh_total == 4772.637
+    assert baseline.solar_kwh_total == 762.957
+    assert baseline.total_kwh == 5535.594
+    assert baseline.raw["source"] == "recorder_interval_start_baseline"
+
+
+def test_recent_overlap_rows_keep_existing_recorder_sum() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=4816.99,
+                grid_kwh_total=4816.99,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 24, 21, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=4818.731,
+                grid_kwh_total=4818.731,
+            ),
+        ],
+        "grid_kwh_total",
+        align_to_hour=True,
+        state_start=4815.742,
+        sum_start=4275.496384846102,
+        max_hourly_delta=50.0,
+    )
+
+    assert rows == [
+        {
+            "start": dt.datetime(2026, 6, 24, 19, 0, tzinfo=dt.UTC),
+            "state": 4816.99,
+            "sum": pytest.approx(4276.744384846102),
+        },
+        {
+            "start": dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+            "state": 4818.731,
+            "sum": pytest.approx(4278.485384846102),
+        },
+    ]
+
+
 def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
     rows = statistics._statistics_rows(
         [
@@ -1268,8 +1978,8 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
         "grid_kwh_total",
     )
 
-    assert [row["state"] for row in rows] == [200.0, 150.0, 175.0]
-    assert [row["sum"] for row in rows] == [0.0, 0.0, 0.0]
+    assert [row["state"] for row in rows] == [200.0]
+    assert [row["sum"] for row in rows] == [0.0]
 
 
 def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
@@ -1297,11 +2007,40 @@ def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
         sum_start=899.0,
     )
 
+    assert rows == []
+
+
+def test_statistics_rows_resume_after_overlap_exceeds_existing_state() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 24, 21, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=5598.5,
+                grid_kwh_total=5598.5,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=5609.0,
+                grid_kwh_total=5609.0,
+            ),
+        ],
+        "grid_kwh_total",
+        state_start=5608.2,
+        sum_start=5416.9,
+        max_hourly_delta=50.0,
+    )
+
     assert rows == [
         {
-            "start": dt.datetime(2026, 6, 21, 17, 0, tzinfo=dt.UTC),
-            "state": 0.9,
-            "sum": 899.0,
+            "start": dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC),
+            "state": 5609.0,
+            "sum": pytest.approx(5417.7),
         }
     ]
 
@@ -1342,7 +2081,7 @@ def test_statistics_rows_skip_implausible_hourly_jump() -> None:
     assert [row["sum"] for row in rows] == [0.0, 0.0, 1.0]
 
 
-def test_statistics_rows_flatten_provider_rollback_to_repair_existing_spike() -> None:
+def test_statistics_rows_omit_provider_rollback_after_existing_spike() -> None:
     rows = statistics._statistics_rows(
         [
             astra_api.AstraMeterReading(
@@ -1372,11 +2111,6 @@ def test_statistics_rows_flatten_provider_rollback_to_repair_existing_spike() ->
         {
             "start": dt.datetime(2026, 6, 22, 14, 0, tzinfo=dt.UTC),
             "state": pytest.approx(1109.27510315664),
-            "sum": pytest.approx(1109.2751031566356),
-        },
-        {
-            "start": dt.datetime(2026, 6, 22, 15, 0, tzinfo=dt.UTC),
-            "state": pytest.approx(763.589),
             "sum": pytest.approx(1109.2751031566356),
         },
     ]
@@ -1478,13 +2212,22 @@ def test_statistics_ids_match_suggested_entity_ids() -> None:
     )
 
 
-def test_diagnostic_and_live_cost_total_sensors_are_not_imported_to_recorder_statistics() -> None:
+def test_unsmoothed_diagnostic_sensors_are_not_imported_to_recorder_statistics() -> None:
     assert "unsmoothed_imported_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_solar_energy" not in statistics.STATISTIC_CHANNELS
     assert "unsmoothed_total_energy" not in statistics.STATISTIC_CHANNELS
-    assert "grid_energy_cost_total" not in statistics.STATISTIC_CHANNELS
-    assert "solar_energy_cost_total" not in statistics.STATISTIC_CHANNELS
-    assert "total_energy_cost_total" not in statistics.STATISTIC_CHANNELS
+
+
+def test_lifetime_cost_total_sensors_are_imported_to_recorder_statistics() -> None:
+    assert statistics.STATISTIC_CHANNELS["grid_energy_cost_total"].value_attr == (
+        "grid_cost_total_gross_eur"
+    )
+    assert statistics.STATISTIC_CHANNELS["solar_energy_cost_total"].value_attr == (
+        "solar_cost_total_gross_eur"
+    )
+    assert statistics.STATISTIC_CHANNELS["total_energy_cost_total"].value_attr == (
+        "total_cost_total_gross_eur"
+    )
 
 
 def test_lifetime_cost_total_sensors_keep_state_class_for_existing_statistics() -> None:
@@ -2016,8 +2759,9 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         password="secret",
         base_url="https://example.test",
     )
-    with pytest.raises(astra_api.AstraProtocolError, match="JSON response"):
-        asyncio.run(json_client._post_raw({"s_action": "get_ts"}))
+    assert asyncio.run(json_client._post_raw({"s_action": "get_ts"})) == (
+        '{"auth": "1", "data": [], "message": "missing checksum suffix"}'
+    )
 
     text_client = astra_api.AstraClient(
         FakeSession(response=FakeResponse("service unavailable without checksum suffix")),

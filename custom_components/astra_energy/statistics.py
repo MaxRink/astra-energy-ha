@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -14,25 +14,31 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import EnergyConverter
 
-from .api import AstraMeterReading
+from .api import AstraApiError, AstraAuthError, AstraDeferredDataError, AstraMeterReading
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+    CONF_GRID_PRICE_NET,
     HISTORY_GRANULARITY_MONTHLY,
     HISTORY_GRANULARITY_QUARTER_HOUR,
     CONF_CACHE_INTERVAL_PAYLOADS,
     CONF_MAX_INTERVAL_AVERAGE_KW,
     CONF_SMOOTH_INTERVAL_ANOMALIES,
     CONF_SMOOTHING_LOOKAROUND_DAYS,
+    CONF_SOLAR_PRICE_NET,
+    CONF_TAX_RATE,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_CACHE_INTERVAL_PAYLOADS,
+    DEFAULT_GRID_PRICE_NET,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
+    DEFAULT_SOLAR_PRICE_NET,
+    DEFAULT_TAX_RATE,
     ISSUE_BACKFILL_FAILED,
     SENSOR_DISPLAY_NAMES,
     SENSOR_OBJECT_IDS,
 )
-from .coordinator import AstraEnergyCoordinator
+from .coordinator import AstraEnergyCoordinator, _meter_id_from_entity_registry
 from .reporting import async_create_issue, async_delete_issue, summarize_counts
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,6 +122,21 @@ STATISTIC_CHANNELS = {
         EnergyConverter.UNIT_CLASS,
         UnitOfEnergy.KILO_WATT_HOUR,
         max_hourly_delta=True,
+    ),
+    "grid_energy_cost_total": StatisticChannel(
+        "grid_cost_total_gross_eur",
+        None,
+        "EUR",
+    ),
+    "solar_energy_cost_total": StatisticChannel(
+        "solar_cost_total_gross_eur",
+        None,
+        "EUR",
+    ),
+    "total_energy_cost_total": StatisticChannel(
+        "total_cost_total_gross_eur",
+        None,
+        "EUR",
     ),
     "current_month_grid_energy": StatisticChannel(
         "current_month_grid_kwh",
@@ -259,11 +280,6 @@ def _statistics_rows(
                         "sum": current_sum,
                     }
                     continue
-                rows_by_start[start] = {
-                    "start": start,
-                    "state": total,
-                    "sum": current_sum,
-                }
                 previous_timestamp = timestamp
                 _LOGGER.warning(
                     "Skipping Astra statistic rollback attr=%s start=%s previous=%s current=%s",
@@ -371,11 +387,116 @@ def _statistic_data(StatisticData, row: dict):
     return StatisticData(**kwargs)
 
 
+def _statistic_import_start(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    align_to_hour: bool = False,
+) -> datetime | None:
+    """Return the first recorder bucket that will be written for a channel."""
+    starts = []
+    for reading in readings:
+        if reading.timestamp is None or getattr(reading, value_attr) is None:
+            continue
+        timestamp = dt_util.as_utc(reading.timestamp)
+        starts.append(_statistics_hour_start(timestamp) if align_to_hour else timestamp)
+    return min(starts) if starts else None
+
+
+def _statistic_import_end(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    align_to_hour: bool = False,
+) -> datetime | None:
+    """Return the last recorder bucket that will be written for a channel."""
+    starts = []
+    for reading in readings:
+        if reading.timestamp is None or getattr(reading, value_attr) is None:
+            continue
+        timestamp = dt_util.as_utc(reading.timestamp)
+        starts.append(_statistics_hour_start(timestamp) if align_to_hour else timestamp)
+    return max(starts) if starts else None
+
+
+def _statistic_bucket(
+    reading: AstraMeterReading,
+    value_attr: str,
+    *,
+    align_to_hour: bool,
+) -> datetime | None:
+    """Return the recorder bucket for one reading/value pair."""
+    if reading.timestamp is None or getattr(reading, value_attr) is None:
+        return None
+    timestamp = dt_util.as_utc(reading.timestamp)
+    return _statistics_hour_start(timestamp) if align_to_hour else timestamp
+
+
+def _readings_after_existing_start(
+    readings: list[AstraMeterReading],
+    value_attr: str,
+    *,
+    existing_start: datetime,
+    existing_state: float | None,
+    align_to_hour: bool,
+) -> list[AstraMeterReading]:
+    """Return readings after an existing recorder row, rebased to its state."""
+    anchor_value: float | None = None
+    after: list[AstraMeterReading] = []
+    for reading in sorted(
+        readings,
+        key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
+    ):
+        bucket = _statistic_bucket(reading, value_attr, align_to_hour=align_to_hour)
+        value = getattr(reading, value_attr)
+        if bucket is None or value is None:
+            continue
+        if bucket <= existing_start:
+            anchor_value = value
+            continue
+        after.append(reading)
+    if existing_state is None or anchor_value is None:
+        return after
+    offset = existing_state - anchor_value
+    if abs(offset) < 0.000000001:
+        return after
+    return [
+        replace(reading, **{value_attr: getattr(reading, value_attr) + offset})
+        for reading in after
+        if getattr(reading, value_attr) is not None
+    ]
+
+
+def _statistic_start_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    require_sum: bool = False,
+) -> dict[str, Any]:
+    """Return the newest usable recorder state/sum from statistic rows."""
+    for row in reversed(rows):
+        state = row.get("state")
+        total_sum = row.get("sum")
+        if require_sum and total_sum is None:
+            continue
+        if state is not None or total_sum is not None:
+            start = {}
+            if state is not None:
+                start["state"] = state
+            if total_sum is not None:
+                start["sum"] = total_sum
+            if row.get("start") is not None:
+                start["start"] = row["start"]
+            return start
+    return {}
+
+
 async def _async_statistic_starts(
     hass: HomeAssistant,
     statistic_ids: set[str],
     start: datetime,
-) -> dict[str, dict[str, float]]:  # pragma: no cover
+    *,
+    require_sum: bool = False,
+) -> dict[str, dict[str, Any]]:  # pragma: no cover
     """Return recorder sum and state immediately before the imported window."""
     query_start = start - timedelta(days=3650)
 
@@ -395,16 +516,9 @@ async def _async_statistic_starts(
         )
         starts = {}
         for statistic_id, rows in result.items():
-            for row in reversed(rows):
-                state = row.get("state")
-                total_sum = row.get("sum")
-                if state is not None or total_sum is not None:
-                    starts[statistic_id] = {}
-                    if state is not None:
-                        starts[statistic_id]["state"] = state
-                    if total_sum is not None:
-                        starts[statistic_id]["sum"] = total_sum
-                    break
+            statistic_start = _statistic_start_from_rows(rows, require_sum=require_sum)
+            if statistic_start:
+                starts[statistic_id] = statistic_start
         return starts
 
     try:
@@ -421,12 +535,100 @@ async def _async_sum_starts(
     start: datetime,
 ) -> dict[str, float]:  # pragma: no cover
     """Return recorder sums immediately before the imported window."""
-    starts = await _async_statistic_starts(hass, statistic_ids, start)
+    starts = await _async_statistic_starts(hass, statistic_ids, start, require_sum=True)
     return {
         statistic_id: values["sum"]
         for statistic_id, values in starts.items()
         if "sum" in values
     }
+
+
+async def _async_interval_start_baseline(
+    hass: HomeAssistant,
+    coordinator: AstraEnergyCoordinator,
+    start: datetime,
+    end: datetime,
+) -> AstraMeterReading | None:
+    """Return a recorder-backed cumulative baseline for interval-only imports."""
+    template = next(iter((coordinator.data or {}).values()), None)
+    meter_id = template.meter_id if template is not None else _meter_id_from_entity_registry(hass)
+    if meter_id is None:
+        return None
+    statistic_ids = {
+        f"sensor.{SENSOR_OBJECT_IDS[channel]}"
+        for channel in ("imported_energy", "solar_energy", "total_energy", "raw_grid_energy")
+    }
+    states = await _async_statistic_starts(
+        hass,
+        statistic_ids,
+        end + timedelta(microseconds=1),
+    )
+    grid_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['imported_energy']}", {})
+    solar_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['solar_energy']}", {})
+    total_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['total_energy']}", {})
+    raw_grid_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['raw_grid_energy']}", {})
+    grid = grid_state.get("state")
+    solar = solar_state.get("state")
+    total = total_state.get("state")
+    raw_grid = raw_grid_state.get("state")
+    if total is None and (grid is not None or solar is not None):
+        total = (grid or 0.0) + (solar or 0.0)
+    if grid is None and total is not None and solar is not None:
+        grid = max(total - solar, 0.0)
+    if all(value is None for value in (grid, solar, total)):
+        return None
+    start_rows = [
+        row_start
+        for row_start in (
+            grid_state.get("start"),
+            solar_state.get("start"),
+            total_state.get("start"),
+            raw_grid_state.get("start"),
+        )
+        if isinstance(row_start, datetime)
+    ]
+    baseline_timestamp = max(start_rows) + timedelta(hours=1) if start_rows else start
+    baseline_timestamp = min(max(baseline_timestamp, start), end)
+    options = coordinator.config_entry.options
+    grid_price_net = (
+        template.grid_price_net_eur_per_kwh
+        if template is not None and template.grid_price_net_eur_per_kwh is not None
+        else float(options.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET))
+    )
+    solar_price_net = (
+        template.solar_price_net_eur_per_kwh
+        if template is not None and template.solar_price_net_eur_per_kwh is not None
+        else float(options.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET))
+    )
+    tax_rate = (
+        template.tax_rate
+        if template is not None and template.tax_rate is not None
+        else float(options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE))
+    )
+    return AstraMeterReading(
+        meter_id=meter_id,
+        meter_name=template.meter_name if template is not None else "Astra Energy Meter",
+        timestamp=baseline_timestamp,
+        power_w=None,
+        imported_kwh_total=grid,
+        grid_kwh_total=grid,
+        solar_kwh_total=solar,
+        total_kwh=total,
+        unsmoothed_grid_kwh_total=grid,
+        unsmoothed_solar_kwh_total=solar,
+        unsmoothed_total_kwh=total,
+        raw_grid_kwh_total=raw_grid if raw_grid is not None else grid,
+        grid_price_net_eur_per_kwh=grid_price_net,
+        grid_price_gross_eur_per_kwh=grid_price_net * (1 + tax_rate),
+        solar_price_net_eur_per_kwh=solar_price_net,
+        solar_price_gross_eur_per_kwh=solar_price_net * (1 + tax_rate),
+        tax_rate=tax_rate,
+        raw={
+            "source": "recorder_interval_start_baseline",
+            "requested_start": start.isoformat(),
+            "baseline_timestamp": baseline_timestamp.isoformat(),
+        },
+    )
 
 
 async def _async_interval_payload_cache(  # pragma: no cover
@@ -492,46 +694,102 @@ async def async_backfill_statistics(  # pragma: no cover
         payload_cache = await _async_interval_payload_cache(hass) if use_cache else {}
         cache_size_before = len(payload_cache)
         cache_before = end - timedelta(hours=recent_refresh_hours) if use_cache else None
-        readings = await coordinator.client.async_get_historical_interval_meter_stands(
+        start_baseline = await _async_interval_start_baseline(
+            hass,
+            coordinator,
             start,
             end,
-            payload_cache=payload_cache if use_cache else None,
-            cache_before=cache_before,
-            max_average_kw=(
-                coordinator.config_entry.options.get(
-                    CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW
-                )
-                if max_average_kw is None
-                else max_average_kw
-            ),
-            smooth_anomalies=(
-                coordinator.config_entry.options.get(
-                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
-                )
-                if smooth_anomalies is None
-                else smooth_anomalies
-            ),
-            redistribution_window=(
-                coordinator.config_entry.options.get(
-                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
-                )
-                if redistribution_window is None
-                else redistribution_window
-            ),
-            smoothing_lookaround_days=(
-                coordinator.config_entry.options.get(
-                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
-                )
-                if smoothing_lookaround_days is None
-                else smoothing_lookaround_days
-            ),
         )
+        interval_start = (
+            max(start, start_baseline.timestamp)
+            if start_baseline is not None and start_baseline.timestamp is not None
+            else start
+        )
+        try:
+            readings = await coordinator.client.async_get_historical_interval_meter_stands(
+                interval_start,
+                end,
+                start_baseline=start_baseline,
+                payload_cache=payload_cache if use_cache else None,
+                cache_before=cache_before,
+                max_average_kw=(
+                    coordinator.config_entry.options.get(
+                        CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW
+                    )
+                    if max_average_kw is None
+                    else max_average_kw
+                ),
+                smooth_anomalies=(
+                    coordinator.config_entry.options.get(
+                        CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+                    )
+                    if smooth_anomalies is None
+                    else smooth_anomalies
+                ),
+                redistribution_window=(
+                    coordinator.config_entry.options.get(
+                        CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                        DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+                    )
+                    if redistribution_window is None
+                    else redistribution_window
+                ),
+                smoothing_lookaround_days=(
+                    coordinator.config_entry.options.get(
+                        CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+                    )
+                    if smoothing_lookaround_days is None
+                    else smoothing_lookaround_days
+                ),
+            )
+        except AstraAuthError:
+            raise
+        except AstraDeferredDataError as err:
+            _LOGGER.warning("Astra historical interval import deferred: %s", err)
+            await async_delete_issue(hass, ISSUE_BACKFILL_FAILED)
+            return {}
+        except AstraApiError as err:
+            _LOGGER.warning("Astra historical interval import deferred: %s", err)
+            await async_create_issue(
+                hass,
+                ISSUE_BACKFILL_FAILED,
+                translation_key=ISSUE_BACKFILL_FAILED,
+                placeholders={"error": str(err)},
+                notification_title="Astra Energy backfill deferred",
+                notification_message=(
+                    "Astra Energy could not fetch a valid historical payload. "
+                    "No statistics were imported; Home Assistant can retry when "
+                    f"Astra returns valid data again. Last error: {err}"
+                ),
+            )
+            return {}
         if use_cache and len(payload_cache) != cache_size_before:
             await _async_save_interval_payload_cache(hass, payload_cache)
     else:
         history_granularity = HISTORY_GRANULARITY_MONTHLY
-        readings = await coordinator.client.async_get_historical_meter_stands(start, end)
+        try:
+            readings = await coordinator.client.async_get_historical_meter_stands(start, end)
+        except AstraAuthError:
+            raise
+        except AstraDeferredDataError as err:
+            _LOGGER.warning("Astra historical import deferred: %s", err)
+            await async_delete_issue(hass, ISSUE_BACKFILL_FAILED)
+            return {}
+        except AstraApiError as err:
+            _LOGGER.warning("Astra historical import deferred: %s", err)
+            await async_create_issue(
+                hass,
+                ISSUE_BACKFILL_FAILED,
+                translation_key=ISSUE_BACKFILL_FAILED,
+                placeholders={"error": str(err)},
+                notification_title="Astra Energy backfill deferred",
+                notification_message=(
+                    "Astra Energy could not fetch a valid historical payload. "
+                    "No statistics were imported; Home Assistant can retry when "
+                    f"Astra returns valid data again. Last error: {err}"
+                ),
+            )
+            return {}
     grouped: dict[str, list[AstraMeterReading]] = {}
     for reading in readings:
         grouped.setdefault(reading.meter_id, []).append(reading)
@@ -564,13 +822,7 @@ async def async_backfill_statistics(  # pragma: no cover
         raise HomeAssistantError("Recorder statistics API is not available") from err
 
     statistic_channels = _statistic_channels_for_granularity(history_granularity)
-    statistic_ids = {
-        _sensor_statistic_id(meter_readings[-1], channel)
-        for meter_readings in grouped.values()
-        if meter_readings
-        for channel in statistic_channels
-    }
-    statistic_starts = await _async_statistic_starts(hass, statistic_ids, start)
+    statistic_starts: dict[tuple[str, datetime], dict[str, float]] = {}
 
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
@@ -590,13 +842,55 @@ async def async_backfill_statistics(  # pragma: no cover
                 unit_class=channel_def.unit_class,
                 unit_of_measurement=channel_def.unit_of_measurement,
             )
+            align_to_hour = history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR
+            channel_readings = meter_readings
+            aligned_import_start = _statistic_import_start(
+                meter_readings,
+                channel_def.value_attr,
+                align_to_hour=align_to_hour,
+            )
+            aligned_import_end = _statistic_import_end(
+                meter_readings,
+                channel_def.value_attr,
+                align_to_hour=align_to_hour,
+            )
+            statistic_start = {}
+            if (
+                channel_def.has_sum
+                and aligned_import_start is not None
+                and aligned_import_end is not None
+            ):
+                cache_key = (statistic_id, aligned_import_end)
+                if cache_key not in statistic_starts:
+                    starts = await _async_statistic_starts(
+                        hass,
+                        {statistic_id},
+                        aligned_import_end + timedelta(microseconds=1),
+                        require_sum=True,
+                    )
+                    statistic_starts[cache_key] = starts.get(statistic_id, {})
+                statistic_start = statistic_starts[cache_key]
+                existing_start = statistic_start.get("start")
+                if (
+                    isinstance(existing_start, datetime)
+                    and existing_start >= aligned_import_start
+                ):
+                    channel_readings = _readings_after_existing_start(
+                        meter_readings,
+                        channel_def.value_attr,
+                        existing_start=existing_start,
+                        existing_state=statistic_start.get("state"),
+                        align_to_hour=align_to_hour,
+                    )
+                    if not channel_readings:
+                        continue
             row_dicts = (
                 _statistics_rows(
-                    meter_readings,
+                    channel_readings,
                     channel_def.value_attr,
-                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
-                    sum_start=statistic_starts.get(statistic_id, {}).get("sum", 0.0),
-                    state_start=statistic_starts.get(statistic_id, {}).get("state"),
+                    align_to_hour=align_to_hour,
+                    sum_start=statistic_start.get("sum", 0.0),
+                    state_start=statistic_start.get("state"),
                     allow_reset=channel_def.allow_reset,
                     max_hourly_delta=(
                         coordinator.config_entry.options.get(
@@ -609,16 +903,16 @@ async def async_backfill_statistics(  # pragma: no cover
                 )
                 if channel_def.has_sum
                 else _statistics_mean_rows(
-                    meter_readings,
+                    channel_readings,
                     channel_def.value_attr,
-                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                    align_to_hour=align_to_hour,
                     value_multiplier=channel_def.value_multiplier,
                 )
                 if channel_def.has_mean
                 else _statistics_state_rows(
-                    meter_readings,
+                    channel_readings,
                     channel_def.value_attr,
-                    align_to_hour=history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR,
+                    align_to_hour=align_to_hour,
                     value_multiplier=channel_def.value_multiplier,
                 )
             )

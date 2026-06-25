@@ -501,7 +501,7 @@ Widget RPC methods observed:
 - Do not expose Android card values (`_vb_vll`, `_lvb_vll`, `_ez_vll`, etc.) as
   Energy Dashboard totals until live values prove they are cumulative.
 - Use the `recent_refresh_hours` option/service field to re-fetch a recent
-  overlap window, default 24 hours, when importing historical statistics.
+  overlap window, default 96 hours, when importing historical statistics.
 - Recorder import rejects negative interval values, impossible interval spikes,
   cumulative rollbacks, and implausible hourly jumps before writing long-term
   statistics. Rejected rows become missing data rather than negative

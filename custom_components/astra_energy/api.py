@@ -49,6 +49,10 @@ class AstraProtocolError(AstraApiError):
     """Astra returned malformed or unverifiable data."""
 
 
+class AstraDeferredDataError(AstraProtocolError):
+    """Astra returned a transient payload that must not be imported yet."""
+
+
 @dataclass(frozen=True)
 class AstraMeterReading:
     """Latest normalized Astra meter reading."""
@@ -137,17 +141,25 @@ def _response_shape(text: str) -> str:
 
 def _checksum_verified_body(text: str) -> str:
     """Return response body after validating Astra's trailing MD5 checksum."""
+    shape = _response_shape(text)
+    if shape == "JSON":
+        try:
+            json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        else:
+            _LOGGER.debug("Astra accepted unsuffixed JSON response")
+            return text
     if len(text) < 32:
-        raise AstraProtocolError("Astra response is too short")
+        raise AstraDeferredDataError("Astra response is too short")
     body = text[:-32]
     checksum = text[-32:]
     if not _looks_like_md5(checksum):
-        shape = _response_shape(text)
         raise AstraProtocolError(
             f"Astra response is not checksum-suffixed ({shape} response)"
         )
     if _md5(body) != checksum:
-        raise AstraProtocolError("Astra response checksum mismatch")
+        raise AstraDeferredDataError("Astra response checksum mismatch")
     return body
 
 
@@ -576,8 +588,10 @@ def _redistribution_weights(
     key: str,
     lookaround_days: int,
     exclude_weight_index: int | None = None,
+    ignore_weight_indexes: set[int] | None = None,
 ) -> list[float]:
     """Return normalized weights for redistributing a delayed interval value."""
+    ignore_weight_indexes = ignore_weight_indexes or set()
     if lookaround_days > 0:
         profile_weights = []
         for index in indexes:
@@ -586,6 +600,8 @@ def _redistribution_weights(
             bucket_weight = 0.0
             for other_index, other in enumerate(points):
                 if other_index == exclude_weight_index:
+                    continue
+                if other_index in ignore_weight_indexes:
                     continue
                 if other is points[index] or not other.get("valid", True):
                     continue
@@ -601,6 +617,8 @@ def _redistribution_weights(
     weights = []
     for index in indexes:
         if index == exclude_weight_index:
+            weight = 0.0
+        elif index in ignore_weight_indexes:
             weight = 0.0
         else:
             weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
@@ -663,6 +681,7 @@ def _redistribute_interval_spikes(
             key=key,
             lookaround_days=smoothing_lookaround_days,
             exclude_weight_index=index if hard_spike else None,
+            ignore_weight_indexes=set() if hard_spike else {index},
         )
         for target_index, weight in zip(indexes, weights, strict=False):
             points[target_index][key] = value * weight
@@ -723,6 +742,7 @@ def _redistribute_delayed_interval_runs(
             weight_keys,
             key=key,
             lookaround_days=smoothing_lookaround_days,
+            ignore_weight_indexes=set(range(index, run_end + 1)),
         )
         for target_index, weight in zip(indexes, weights, strict=False):
             points[target_index][key] = total * weight
@@ -1338,6 +1358,7 @@ class AstraClient:
         start: datetime,
         end: datetime,
         *,
+        start_baseline: AstraMeterReading | None = None,
         payload_cache: dict[str, dict[str, Any]] | None = None,
         cache_before: datetime | None = None,
         max_average_kw: float | None = None,
@@ -1346,8 +1367,6 @@ class AstraClient:
         smoothing_lookaround_days: int | None = None,
     ) -> list[AstraMeterReading]:
         """Fetch 15-minute energy balance intervals as cumulative readings."""
-        if not self._authenticated:
-            await self.async_login()
         max_average_kw = (
             self._max_interval_average_kw if max_average_kw is None else max_average_kw
         )
@@ -1365,11 +1384,33 @@ class AstraClient:
             else smoothing_lookaround_days
         )
 
-        latest_readings = await self._read_latest_meter_stands()
-        template = latest_readings[0] if latest_readings else None
+        template = start_baseline
+        forward_from_start = start_baseline is not None
         if template is None:
-            monthly_readings = await self.async_get_historical_meter_stands(start, end)
+            latest_readings: list[AstraMeterReading] = []
+            try:
+                latest_readings = await self._read_latest_meter_stands()
+            except AstraApiError as err:
+                _LOGGER.warning(
+                    "Astra latest meter stand fetch failed before interval backfill: %s",
+                    err,
+                )
+            template = latest_readings[0] if latest_readings else None
+        if template is None:
+            try:
+                monthly_readings = await self.async_get_historical_meter_stands(start, end)
+            except AstraApiError as err:
+                _LOGGER.warning(
+                    "Astra monthly meter stand fetch failed before interval backfill: %s",
+                    err,
+                )
+                monthly_readings = []
             template = monthly_readings[-1] if monthly_readings else None
+        if template is None:
+            _LOGGER.warning(
+                "Astra interval backfill deferred because no cumulative meter baseline is available"
+            )
+            return []
 
         days = _iter_days(start.date(), end.date())
         semaphore = asyncio.Semaphore(DAILY_INTERVAL_CONCURRENCY)
@@ -1378,28 +1419,46 @@ class AstraClient:
         cache_hits = 0
         fetched = 0
 
-        async def fetch_day(day: date) -> tuple[date, dict[str, Any]]:
+        async def fetch_day(day: date) -> tuple[date, dict[str, Any], dict[str, int]]:
             nonlocal cache_hits, fetched
             cache_key = day.isoformat()
             if cache_before_date is not None and day < cache_before_date and cache_key in payload_cache:
                 cache_hits += 1
-                return day, payload_cache[cache_key]
+                return day, payload_cache[cache_key], {}
             async with semaphore:
-                data = await self._get_json(
-                    "get_mtr_eb",
-                    s_year=str(day.year),
-                    s_mnt=str(day.month),
-                    s_datum=day.isoformat(),
-                )
+                try:
+                    data = await self._get_json(
+                        "get_mtr_eb",
+                        s_year=str(day.year),
+                        s_mnt=str(day.month),
+                        s_datum=day.isoformat(),
+                    )
+                except AstraApiError as err:
+                    if cache_key in payload_cache:
+                        cache_hits += 1
+                        _LOGGER.warning(
+                            "Astra interval payload fetch failed for %s; using cached payload: %s",
+                            day.isoformat(),
+                            err,
+                        )
+                        return day, payload_cache[cache_key], {"interval_cache_fallback": 1}
+                    _LOGGER.warning(
+                        "Astra interval payload fetch failed for %s: %s",
+                        day.isoformat(),
+                        err,
+                    )
+                    return day, {"data": []}, {"interval_fetch_failed": 1}
                 fetched += 1
                 payload_cache[cache_key] = data
-                return day, data
+                return day, data, {}
 
         payloads = await asyncio.gather(*(fetch_day(day) for day in days))
         raw_points = []
         invalid_hours: set[datetime] = set()
         anomaly_report: dict[str, int] = {}
-        for day, data in sorted(payloads, key=lambda item: item[0]):
+        for day, data, fetch_report in sorted(payloads, key=lambda item: item[0]):
+            for key, value in fetch_report.items():
+                anomaly_report[key] = anomaly_report.get(key, 0) + value
             day_points, day_report = _daily_interval_raw_values_from_payload(
                 data,
                 day,
@@ -1449,29 +1508,41 @@ class AstraClient:
         end_grid = _total_or_zero(template.grid_kwh_total if template else None)
         if end_grid == 0.0 and end_total > 0.0:
             end_grid = max(end_total - end_solar, 0.0)
-        totals = {
-            "grid": max(end_grid - sum(point["grid_kwh"] for point in points), 0.0),
-            "solar": max(end_solar - sum(point["solar_kwh"] for point in points), 0.0),
-            "total": max(end_total - sum(point["total_kwh"] for point in points), 0.0),
-            "raw_grid": max(
-                _total_or_zero(
-                    template.raw_grid_kwh_total
-                    if template and template.raw_grid_kwh_total is not None
-                    else end_grid
-                )
-                - sum(point.get("raw_grid_kwh") or point["grid_kwh"] for point in points),
-                0.0,
-            ),
-            "unsmoothed_grid": max(
-                end_grid - sum(point["unsmoothed_grid_kwh"] for point in points), 0.0
-            ),
-            "unsmoothed_solar": max(
-                end_solar - sum(point["unsmoothed_solar_kwh"] for point in points), 0.0
-            ),
-            "unsmoothed_total": max(
-                end_total - sum(point["unsmoothed_total_kwh"] for point in points), 0.0
-            ),
-        }
+        raw_grid_total = _total_or_zero(
+            template.raw_grid_kwh_total
+            if template and template.raw_grid_kwh_total is not None
+            else end_grid
+        )
+        if forward_from_start:
+            totals = {
+                "grid": end_grid,
+                "solar": end_solar,
+                "total": end_total,
+                "raw_grid": raw_grid_total,
+                "unsmoothed_grid": end_grid,
+                "unsmoothed_solar": end_solar,
+                "unsmoothed_total": end_total,
+            }
+        else:
+            totals = {
+                "grid": max(end_grid - sum(point["grid_kwh"] for point in points), 0.0),
+                "solar": max(end_solar - sum(point["solar_kwh"] for point in points), 0.0),
+                "total": max(end_total - sum(point["total_kwh"] for point in points), 0.0),
+                "raw_grid": max(
+                    raw_grid_total
+                    - sum(point.get("raw_grid_kwh") or point["grid_kwh"] for point in points),
+                    0.0,
+                ),
+                "unsmoothed_grid": max(
+                    end_grid - sum(point["unsmoothed_grid_kwh"] for point in points), 0.0
+                ),
+                "unsmoothed_solar": max(
+                    end_solar - sum(point["unsmoothed_solar_kwh"] for point in points), 0.0
+                ),
+                "unsmoothed_total": max(
+                    end_total - sum(point["unsmoothed_total_kwh"] for point in points), 0.0
+                ),
+            }
         readings: list[AstraMeterReading] = []
         month_totals: dict[tuple[int, int], dict[str, float]] = {}
         year_totals: dict[int, dict[str, float]] = {}
