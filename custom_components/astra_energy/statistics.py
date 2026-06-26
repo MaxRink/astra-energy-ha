@@ -63,42 +63,6 @@ class StatisticChannel:
 
 
 STATISTIC_CHANNELS = {
-    "current_month_grid_cost": StatisticChannel(
-        "current_month_grid_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_month_solar_cost": StatisticChannel(
-        "current_month_solar_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_month_total_cost": StatisticChannel(
-        "current_month_total_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_year_grid_cost": StatisticChannel(
-        "current_year_grid_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_year_solar_cost": StatisticChannel(
-        "current_year_solar_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
-    "current_year_total_cost": StatisticChannel(
-        "current_year_total_cost_gross_eur",
-        None,
-        "EUR",
-        has_sum=False,
-    ),
     "imported_energy": StatisticChannel(
         "grid_kwh_total",
         EnergyConverter.UNIT_CLASS,
@@ -138,48 +102,6 @@ STATISTIC_CHANNELS = {
         None,
         "EUR",
     ),
-    "current_month_grid_energy": StatisticChannel(
-        "current_month_grid_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_month_solar_energy": StatisticChannel(
-        "current_month_solar_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_month_total_energy": StatisticChannel(
-        "current_month_total_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_year_grid_energy": StatisticChannel(
-        "current_year_grid_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_year_solar_energy": StatisticChannel(
-        "current_year_solar_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_year_total_energy": StatisticChannel(
-        "current_year_total_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
-    "current_year_raw_grid_energy": StatisticChannel(
-        "current_year_raw_grid_kwh",
-        EnergyConverter.UNIT_CLASS,
-        UnitOfEnergy.KILO_WATT_HOUR,
-        has_sum=False,
-    ),
     "grid_price": StatisticChannel(
         "grid_price_gross_eur_per_kwh",
         None,
@@ -213,13 +135,7 @@ def _statistic_channels_for_granularity(
     history_granularity: str,
 ) -> dict[str, StatisticChannel]:
     """Return channels that are valid for a backfill granularity."""
-    if history_granularity != HISTORY_GRANULARITY_QUARTER_HOUR:
-        return STATISTIC_CHANNELS
-    return {
-        channel: channel_def
-        for channel, channel_def in STATISTIC_CHANNELS.items()
-        if not channel.startswith(("current_month_", "current_year_"))
-    }
+    return STATISTIC_CHANNELS
 
 
 def _sensor_statistic_id(reading: AstraMeterReading, channel: str) -> str:

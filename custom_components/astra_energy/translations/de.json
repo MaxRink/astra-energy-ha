@@ -181,6 +181,10 @@
       "title": "Astra-Energy-Authentifizierung fehlgeschlagen",
       "description": "Astra hat die gespeicherten Zugangsdaten abgelehnt. Authentifiziere die Astra-Energy-Integration erneut. Letzter Fehler: {error}"
     },
+    "api_deferred": {
+      "title": "Astra-Energy-Daten zurückgestellt",
+      "description": "Astra hat eine leere, fehlerhafte oder unvollständige Antwort geliefert. Astra Energy hat kumulative Energie-Sensoren zurückgehalten, damit Home Assistant keine ungültigen Statistiken speichert. Letzter Fehler: {error}"
+    },
     "api_unavailable": {
       "title": "Astra-Energy-Aktualisierung fehlgeschlagen",
       "description": "Astra Energy konnte keine Zählerdaten abrufen. Home Assistant versucht es automatisch erneut. Letzter Fehler: {error}"

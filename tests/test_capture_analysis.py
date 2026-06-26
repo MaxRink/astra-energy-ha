@@ -1147,7 +1147,7 @@ def test_historical_backfill_non_deferred_error_keeps_repair_issue(monkeypatch) 
     assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
 
 
-def test_coordinator_deferred_update_does_not_create_repair_issue(monkeypatch) -> None:
+def test_coordinator_deferred_update_creates_warning_issue(monkeypatch) -> None:
     calls = []
 
     async def create_issue(*args, **kwargs):
@@ -1182,8 +1182,10 @@ def test_coordinator_deferred_update_does_not_create_repair_issue(monkeypatch) -
 
     assert result == {}
     assert coordinator.api_status == "deferred"
-    assert [call[0] for call in calls] == ["delete"]
+    assert [call[0] for call in calls] == ["delete", "create"]
     assert calls[0][1][1] == astra_coordinator.ISSUE_API_UNAVAILABLE
+    assert calls[1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
+    assert calls[1][2]["severity"] == "warning"
 
 
 def test_coordinator_deferred_update_checks_web_session_status(monkeypatch) -> None:
@@ -1194,7 +1196,11 @@ def test_coordinator_deferred_update_checks_web_session_status(monkeypatch) -> N
     async def delete_issue(*_args, **_kwargs):
         return None
 
+    async def create_issue(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
         hass=object(),
@@ -2683,19 +2689,6 @@ def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> No
 def test_statistics_channels_include_historical_derived_metrics() -> None:
     for channel in {
         "raw_grid_energy",
-        "current_month_grid_energy",
-        "current_month_solar_energy",
-        "current_month_total_energy",
-        "current_month_grid_cost",
-        "current_month_solar_cost",
-        "current_month_total_cost",
-        "current_year_grid_energy",
-        "current_year_solar_energy",
-        "current_year_total_energy",
-        "current_year_raw_grid_energy",
-        "current_year_grid_cost",
-        "current_year_solar_cost",
-        "current_year_total_cost",
         "grid_price",
         "solar_price",
         "tax_rate",
@@ -2709,7 +2702,6 @@ def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
     monthly_channels = statistics._statistic_channels_for_granularity("monthly")
     channels = statistics._statistic_channels_for_granularity("quarter_hour")
 
-    assert "current_month_total_energy" in monthly_channels
     assert "imported_energy" in channels
     assert "solar_energy" in channels
     assert "total_energy" in channels
@@ -2718,12 +2710,35 @@ def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
     assert "current_month_total_cost" not in channels
     assert "current_year_total_energy" not in channels
     assert "current_year_total_cost" not in channels
+    assert "current_month_total_energy" not in monthly_channels
+    assert "current_year_total_energy" not in monthly_channels
 
 
-def test_period_and_measurement_statistics_are_state_only() -> None:
-    assert not statistics.STATISTIC_CHANNELS["current_month_total_energy"].has_sum
-    assert not statistics.STATISTIC_CHANNELS["current_year_total_energy"].has_sum
-    assert not statistics.STATISTIC_CHANNELS["current_year_total_cost"].has_sum
+def test_period_and_unsmoothed_entities_do_not_opt_into_recorder_statistics() -> None:
+    descriptions = {description.key: description for description in astra_sensor.SENSOR_DESCRIPTIONS}
+    for key in {
+        "unsmoothed_imported_energy",
+        "unsmoothed_solar_energy",
+        "unsmoothed_total_energy",
+        "current_month_grid_energy",
+        "current_month_solar_energy",
+        "current_month_total_energy",
+        "current_month_grid_cost",
+        "current_month_solar_cost",
+        "current_month_total_cost",
+        "current_year_grid_energy",
+        "current_year_solar_energy",
+        "current_year_total_energy",
+        "current_year_raw_grid_energy",
+        "current_year_grid_cost",
+        "current_year_solar_cost",
+        "current_year_total_cost",
+    }:
+        assert descriptions[key].state_class is None
+        assert key not in statistics.STATISTIC_CHANNELS
+
+
+def test_measurement_statistics_are_not_sum_statistics() -> None:
     assert not statistics.STATISTIC_CHANNELS["grid_price"].has_sum
     assert statistics.STATISTIC_CHANNELS["grid_price"].has_mean
 

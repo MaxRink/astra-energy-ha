@@ -180,6 +180,10 @@
       "title": "Astra Energy authentication failed",
       "description": "Astra rejected the stored credentials. Reauthenticate the Astra Energy integration. Last error: {error}"
     },
+    "api_deferred": {
+      "title": "Astra Energy data deferred",
+      "description": "Astra returned an empty, malformed, or incomplete payload. Astra Energy withheld cumulative energy sensors to avoid invalid Home Assistant statistics. Last error: {error}"
+    },
     "api_unavailable": {
       "title": "Astra Energy update failed",
       "description": "Astra Energy could not fetch meter data. Home Assistant will retry automatically. Last error: {error}"

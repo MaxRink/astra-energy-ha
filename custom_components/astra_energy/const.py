@@ -162,6 +162,7 @@ SENSOR_STATISTIC_LABELS = {
 }
 
 ISSUE_API_AUTH = "api_auth_failed"
+ISSUE_API_DEFERRED = "api_deferred"
 ISSUE_API_UNAVAILABLE = "api_unavailable"
 ISSUE_BACKFILL_FAILED = "backfill_failed"
 ISSUE_WEB_SESSION = "web_session_failed"

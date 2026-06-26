@@ -104,7 +104,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="unsmoothed_grid_kwh_total",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
     AstraSensorEntityDescription(
         key="unsmoothed_solar_energy",
@@ -112,7 +111,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="unsmoothed_solar_kwh_total",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
     AstraSensorEntityDescription(
         key="unsmoothed_total_energy",
@@ -120,7 +118,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="unsmoothed_total_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
     AstraSensorEntityDescription(
         key="exported_energy",
@@ -185,7 +182,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_grid_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_solar_energy",
@@ -193,7 +189,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_solar_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_total_energy",
@@ -201,7 +196,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_total_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_grid_cost",
@@ -209,7 +203,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_grid_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_solar_cost",
@@ -217,7 +210,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_solar_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_month_total_cost",
@@ -225,7 +217,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_month_total_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_grid_energy",
@@ -233,7 +224,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_grid_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_solar_energy",
@@ -241,7 +231,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_solar_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_total_energy",
@@ -249,7 +238,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_total_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_raw_grid_energy",
@@ -257,7 +245,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_raw_grid_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_grid_cost",
@@ -265,7 +252,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_grid_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_solar_cost",
@@ -273,7 +259,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_solar_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="current_year_total_cost",
@@ -281,7 +266,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="current_year_total_cost_gross_eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
     ),
     AstraSensorEntityDescription(
         key="autarky",

@@ -46,6 +46,7 @@ from .const import (
     DEFAULT_WEB_GRAPH_TOTAL_ID,
     DOMAIN,
     ISSUE_API_AUTH,
+    ISSUE_API_DEFERRED,
     ISSUE_API_UNAVAILABLE,
     ISSUE_WEB_SESSION,
     SENSOR_OBJECT_IDS,
@@ -148,6 +149,20 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             self.last_error = error_payload(err)
             await self._async_update_web_session_status()
             await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
+            await async_create_issue(
+                self.hass,
+                ISSUE_API_DEFERRED,
+                translation_key=ISSUE_API_DEFERRED,
+                severity="warning",
+                placeholders={"error": str(err)},
+                notification_title="Astra Energy data deferred",
+                notification_message=(
+                    "Astra returned an empty, malformed, or incomplete payload. "
+                    "Astra Energy is withholding cumulative energy sensors so "
+                    "Home Assistant does not record invalid statistics. Last "
+                    f"error: {type(err).__name__}: {err}"
+                ),
+            )
             _LOGGER.warning("Astra Energy update deferred: %s", err)
             if self.data:
                 return self.data
@@ -175,6 +190,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         self.last_error = None
         await self._async_update_web_session_status()
         await async_delete_issue(self.hass, ISSUE_API_AUTH)
+        await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
         await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
         previous_readings = await self._async_previous_readings(readings)
         return {
