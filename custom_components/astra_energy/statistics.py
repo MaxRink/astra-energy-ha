@@ -640,6 +640,12 @@ async def async_backfill_statistics(  # pragma: no cover
     """Fetch historical readings and optionally import long-term statistics."""
     if days <= 0 and recent_refresh_hours <= 0:
         return {}
+    if import_statistics and getattr(coordinator, "api_status", None) == "deferred":
+        _LOGGER.warning(
+            "Astra historical statistics import skipped because live provider data is deferred"
+        )
+        await async_delete_issue(hass, ISSUE_BACKFILL_FAILED)
+        return {}
     end = dt_util.utcnow()
     start_candidates = []
     if days > 0:

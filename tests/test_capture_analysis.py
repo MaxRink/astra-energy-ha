@@ -1110,6 +1110,45 @@ def test_historical_backfill_deferred_error_does_not_create_repair_issue(monkeyp
     assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
 
 
+def test_historical_backfill_skips_statistics_import_when_live_api_is_deferred(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class Client:
+        async def async_get_historical_meter_stands(self, _start, _end):
+            raise AssertionError("deferred live state must block historical import")
+
+        async def async_get_historical_interval_meter_stands(self, *_args, **_kwargs):
+            raise AssertionError("deferred live state must block interval import")
+
+    coordinator = types.SimpleNamespace(
+        api_status="deferred",
+        client=Client(),
+        config_entry=types.SimpleNamespace(options={}),
+    )
+
+    monkeypatch.setattr(statistics, "async_delete_issue", delete_issue)
+
+    result = asyncio.run(
+        statistics.async_backfill_statistics(
+            object(),
+            coordinator,
+            days=0,
+            recent_refresh_hours=96,
+            history_granularity=statistics.HISTORY_GRANULARITY_QUARTER_HOUR,
+            import_statistics=True,
+        )
+    )
+
+    assert result == {}
+    assert [call[0] for call in calls] == ["delete"]
+    assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
+
+
 def test_historical_backfill_non_deferred_error_keeps_repair_issue(monkeypatch) -> None:
     calls = []
 
