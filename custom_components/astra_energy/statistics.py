@@ -320,6 +320,54 @@ def _statistics_rows(
     return list(rows_by_start.values())
 
 
+def _nondecreasing_statistics_rows(
+    rows: list[dict],
+    *,
+    value_attr: str,
+    state_start: float | None,
+    sum_start: float | None,
+) -> list[dict]:
+    """Drop recorder rows that would move a cumulative statistic backwards."""
+    filtered: list[dict] = []
+    previous_state = state_start
+    previous_sum = sum_start
+    for row in rows:
+        state = row.get("state")
+        total_sum = row.get("sum")
+        if (
+            previous_state is not None
+            and state is not None
+            and state < previous_state
+        ):
+            _LOGGER.warning(
+                "Dropping Astra statistic row with lower state attr=%s start=%s previous=%s current=%s",
+                value_attr,
+                row.get("start"),
+                previous_state,
+                state,
+            )
+            continue
+        if (
+            previous_sum is not None
+            and total_sum is not None
+            and total_sum < previous_sum
+        ):
+            _LOGGER.warning(
+                "Dropping Astra statistic row with lower sum attr=%s start=%s previous=%s current=%s",
+                value_attr,
+                row.get("start"),
+                previous_sum,
+                total_sum,
+            )
+            continue
+        filtered.append(row)
+        if state is not None:
+            previous_state = state
+        if total_sum is not None:
+            previous_sum = total_sum
+    return filtered
+
+
 def _statistics_state_rows(
     readings: list[AstraMeterReading],
     value_attr: str,
@@ -916,6 +964,13 @@ async def async_backfill_statistics(  # pragma: no cover
                     value_multiplier=channel_def.value_multiplier,
                 )
             )
+            if channel_def.has_sum:
+                row_dicts = _nondecreasing_statistics_rows(
+                    row_dicts,
+                    value_attr=channel_def.value_attr,
+                    state_start=statistic_start.get("state"),
+                    sum_start=statistic_start.get("sum"),
+                )
             rows = [
                 _statistic_data(StatisticData, row)
                 for row in row_dicts

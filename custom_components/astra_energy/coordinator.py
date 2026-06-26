@@ -65,6 +65,7 @@ _BASELINE_COST_STATISTIC_ATTRS = {
     "solar_energy_cost_total": "solar_kwh_total",
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
+_MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
 
 
 class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]):
@@ -175,7 +176,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         await self._async_update_web_session_status()
         await async_delete_issue(self.hass, ISSUE_API_AUTH)
         await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
-        previous_readings = self.data or await self._async_recorder_baseline_readings(readings)
+        previous_readings = await self._async_previous_readings(readings)
         return {
             reading.meter_id: monotonic_reading(
                 reading,
@@ -184,13 +185,30 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             for reading in readings
         }
 
-    async def _async_recorder_baseline_readings(
+    async def _async_previous_readings(
         self, readings: list[AstraMeterReading]
     ) -> dict[str, AstraMeterReading]:
+        """Return in-memory and recorder-backed readings for monotonic repair."""
+        previous_readings = dict(self.data or {})
+        recorder_readings = await self._async_recorder_baseline_readings(
+            readings,
+            force=bool(previous_readings),
+        )
+        for meter_id, recorder_reading in recorder_readings.items():
+            previous_readings[meter_id] = monotonic_reading(
+                recorder_reading,
+                previous_readings.get(meter_id),
+            )
+        return previous_readings
+
+    async def _async_recorder_baseline_readings(
+        self, readings: list[AstraMeterReading], *, force: bool = False
+    ) -> dict[str, AstraMeterReading]:
         """Return startup baselines from recorder so monotonic repair survives restarts."""
-        if self._recorder_baselines_loaded:
+        if self._recorder_baselines_loaded and not force:
             return {}
-        self._recorder_baselines_loaded = True
+        if not force:
+            self._recorder_baselines_loaded = True
         statistic_ids = {
             f"sensor.{SENSOR_OBJECT_IDS[channel]}"
             for channel in _BASELINE_ENERGY_STATISTIC_ATTRS
@@ -431,6 +449,11 @@ def _baseline_reading_from_statistics(
         )
         for attr in _BASELINE_ENERGY_STATISTIC_ATTRS.values()
     }
+    values = _hold_consistent_recorder_baseline_on_large_provider_rollback(
+        values,
+        energy_values,
+        reading,
+    )
     if all(value is None for value in values.values()):
         return None
     return AstraMeterReading(
@@ -444,6 +467,57 @@ def _baseline_reading_from_statistics(
         total_kwh=values["total_kwh"],
         raw={"source": "recorder_baseline"},
     )
+
+
+def _hold_consistent_recorder_baseline_on_large_provider_rollback(
+    values: dict[str, float | None],
+    energy_values: dict[str, float | None],
+    reading: AstraMeterReading,
+) -> dict[str, float | None]:
+    """Hold recorder maxima when Astra publishes a large lower counter set."""
+    grid = energy_values.get("grid_kwh_total")
+    solar = energy_values.get("solar_kwh_total")
+    total = energy_values.get("total_kwh")
+    provider_grid = reading.grid_kwh_total or reading.imported_kwh_total
+    provider_solar = reading.solar_kwh_total
+    provider_total = reading.total_kwh
+    if grid is None or solar is None or total is None:
+        return values
+    if abs((grid + solar) - total) > _MAX_STARTUP_BASELINE_REPAIR_KWH:
+        return values
+
+    provider_values = {
+        "grid_kwh_total": provider_grid,
+        "solar_kwh_total": provider_solar,
+        "total_kwh": provider_total,
+    }
+    source_rollbacks = [
+        baseline - provider
+        for baseline, provider in ((grid, provider_grid), (solar, provider_solar))
+        if provider is not None and baseline > provider
+    ]
+    if (
+        len(source_rollbacks) < 2
+        or any(rollback <= _MAX_STARTUP_BASELINE_REPAIR_KWH for rollback in source_rollbacks)
+        or any(rollback > _MAX_STARTUP_BASELINE_HOLD_KWH for rollback in source_rollbacks)
+    ):
+        return values
+    held = dict(values)
+    for attr, baseline in (
+        ("grid_kwh_total", grid),
+        ("solar_kwh_total", solar),
+        ("total_kwh", total),
+    ):
+        provider = provider_values[attr]
+        if provider is None or baseline <= provider:
+            continue
+        rollback = baseline - provider
+        if (
+            rollback > _MAX_STARTUP_BASELINE_REPAIR_KWH
+            and rollback <= _MAX_STARTUP_BASELINE_HOLD_KWH
+        ):
+            held[attr] = baseline
+    return held
 
 
 def _cost_derived_baselines(
