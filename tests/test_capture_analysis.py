@@ -1354,6 +1354,82 @@ def test_coordinator_update_uses_recorder_max_after_backfill(monkeypatch) -> Non
     assert reading.total_kwh == pytest.approx(6924.050277)
 
 
+def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
+    calls = []
+
+    class Client:
+        async def async_get_meters(self):
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="1EBZ0103002978_0",
+                    meter_name="Strom",
+                    timestamp=dt.datetime(2026, 6, 26, 9, 13, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=5715.925977,
+                    grid_kwh_total=5715.925977,
+                    solar_kwh_total=1411.2463,
+                    total_kwh=7127.172277,
+                )
+            ]
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    async def recorder_states(_hass, _statistic_ids):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_async_recorder_baseline_states",
+        recorder_states,
+    )
+
+    previous = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978_0",
+        meter_name="Strom",
+        timestamp=dt.datetime(2026, 6, 26, 8, 58, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=5523.159996,
+        grid_kwh_total=5523.159996,
+        solar_kwh_total=1279.350281,
+        total_kwh=6802.510277,
+    )
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0}
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+    coordinator.data = {"1EBZ0103002978_0": previous}
+    coordinator.last_successful_source = "mobile"
+    coordinator._last_mobile_success_at = astra_coordinator.dt_util.utcnow() - dt.timedelta(
+        minutes=5
+    )
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result == {"1EBZ0103002978_0": previous}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_error["type"] == "AstraDeferredDataError"
+    assert [call[0] for call in calls] == ["delete", "create"]
+    assert calls[1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
+
+
 def test_coordinator_non_deferred_update_keeps_repair_issue(monkeypatch) -> None:
     calls = []
 

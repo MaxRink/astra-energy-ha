@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntryAuthFailed
 from homeassistant.core import HomeAssistant
@@ -124,6 +124,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             "response_bytes": None,
         }
         self._recorder_baselines_loaded = False
+        self._last_mobile_success_at = None
 
     async def _async_update_data(self) -> dict[str, AstraMeterReading]:
         """Fetch latest Astra data."""
@@ -185,21 +186,61 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             )
             raise UpdateFailed(str(err)) from err
 
+        now = dt_util.utcnow()
+        previous_readings = await self._async_previous_readings(readings)
+        live_elapsed_hours = _elapsed_hours(self._last_mobile_success_at, now)
+        max_average_kw = float(
+            self.config_entry.options.get(
+                CONF_MAX_INTERVAL_AVERAGE_KW,
+                DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+            )
+        )
+        normalized_readings = {}
+        for reading in readings:
+            previous = previous_readings.get(reading.meter_id) if previous_readings else None
+            live_previous = (self.data or {}).get(reading.meter_id)
+            if _has_implausible_live_jump(
+                reading,
+                live_previous,
+                max_average_kw=max_average_kw,
+                elapsed_hours=live_elapsed_hours,
+            ):
+                err = AstraDeferredDataError(
+                    "Astra live meter payload contains an implausible cumulative jump"
+                )
+                self.api_status = "deferred"
+                self.last_error = error_payload(err)
+                await self._async_update_web_session_status()
+                await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
+                await async_create_issue(
+                    self.hass,
+                    ISSUE_API_DEFERRED,
+                    translation_key=ISSUE_API_DEFERRED,
+                    severity="warning",
+                    placeholders={"error": str(err)},
+                    notification_title="Astra Energy data deferred",
+                    notification_message=(
+                        "Astra returned an implausible live cumulative meter jump. "
+                        "Astra Energy withheld cumulative energy sensors so "
+                        "Home Assistant does not record invalid statistics. Last "
+                        f"error: {type(err).__name__}: {err}"
+                    ),
+                )
+                _LOGGER.warning(
+                    "Astra Energy update deferred because of an implausible live jump"
+                )
+                return self.data or {}
+            normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
+
         self.api_status = "ok"
         self.last_successful_source = "mobile"
         self.last_error = None
+        self._last_mobile_success_at = now
         await self._async_update_web_session_status()
         await async_delete_issue(self.hass, ISSUE_API_AUTH)
         await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
         await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
-        previous_readings = await self._async_previous_readings(readings)
-        return {
-            reading.meter_id: monotonic_reading(
-                reading,
-                previous_readings.get(reading.meter_id) if previous_readings else None,
-            )
-            for reading in readings
-        }
+        return normalized_readings
 
     async def _async_previous_readings(
         self, readings: list[AstraMeterReading]
@@ -359,6 +400,50 @@ def _max_statistic_states(rows_by_statistic_id: dict[str, list[dict]]) -> dict[s
         if present_states:
             states[statistic_id] = max(present_states)
     return states
+
+
+def _elapsed_hours(start: datetime | None, end: datetime) -> float | None:
+    """Return positive elapsed hours between two update timestamps."""
+    if start is None:
+        return None
+    elapsed = (end - start).total_seconds() / 3600
+    if elapsed <= 0:
+        return None
+    return elapsed
+
+
+def _has_implausible_live_jump(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading | None,
+    *,
+    max_average_kw: float,
+    elapsed_hours: float | None,
+) -> bool:
+    """Return whether a live cumulative update is too large to publish."""
+    if previous is None or elapsed_hours is None:
+        return False
+    max_delta = max_average_kw * max(elapsed_hours, 0.25)
+    checks = (
+        ("grid", reading.grid_kwh_total, previous.grid_kwh_total),
+        ("imported", reading.imported_kwh_total, previous.imported_kwh_total),
+        ("solar", reading.solar_kwh_total, previous.solar_kwh_total),
+        ("total", reading.total_kwh, previous.total_kwh),
+    )
+    for label, current, prior in checks:
+        if current is None or prior is None:
+            continue
+        delta = current - prior
+        if delta > max_delta:
+            _LOGGER.warning(
+                "Rejecting Astra live %s jump: previous=%s current=%s delta=%s limit=%s",
+                label,
+                prior,
+                current,
+                delta,
+                max_delta,
+            )
+            return True
+    return False
 
 
 def _meter_id_from_entity_registry(hass: HomeAssistant) -> str | None:
