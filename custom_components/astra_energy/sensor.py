@@ -58,6 +58,11 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
     ),
 )
 
+_DEFERRED_UNAVAILABLE_STATE_CLASSES = {
+    SensorStateClass.TOTAL,
+    SensorStateClass.TOTAL_INCREASING,
+}
+
 
 SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
     AstraSensorEntityDescription(
@@ -357,6 +362,20 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
     def name(self) -> str | None:
         """Return a friendly name."""
         return SENSOR_DISPLAY_NAMES[self.entity_description.key]
+
+    @property
+    def available(self) -> bool:
+        """Return whether the value is currently safe to publish."""
+        try:
+            coordinator_available = super().available
+        except AttributeError:
+            coordinator_available = True
+        if not coordinator_available or self.reading is None:
+            return False
+        return not (
+            self.coordinator.api_status == "deferred"
+            and self.entity_description.state_class in _DEFERRED_UNAVAILABLE_STATE_CLASSES
+        )
 
     @property
     def native_value(self):
