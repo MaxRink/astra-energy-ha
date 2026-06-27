@@ -23,6 +23,9 @@ CONF_WEB_BASE_URL = "web_base_url"
 CONF_WEB_SESSION_ID = "web_session_id"
 CONF_WEB_COOKIE = "web_cookie"
 CONF_WEB_GRAPH_TOTAL_ID = "web_graph_total_id"
+CONF_BROWSER_PROXY_ENABLED = "browser_proxy_enabled"
+CONF_BROWSER_PROXY_URL = "browser_proxy_url"
+CONF_BROWSER_PROXY_TOKEN = "browser_proxy_token"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
 CONF_RUN_IN_BACKGROUND = "run_in_background"
 
@@ -56,6 +59,9 @@ DEFAULT_CACHE_INTERVAL_PAYLOADS = True
 DEFAULT_WEB_FALLBACK_ENABLED = False
 DEFAULT_WEB_BASE_URL = "https://astra-cloud.com/astra04/readyxnet/source/pm"
 DEFAULT_WEB_GRAPH_TOTAL_ID = ""
+DEFAULT_BROWSER_PROXY_ENABLED = False
+DEFAULT_BROWSER_PROXY_URL = "http://192.168.1.104:43104"
+DEFAULT_BROWSER_PROXY_TOKEN = ""
 
 MIN_POLL_INTERVAL = 60
 MAX_BACKFILL_DAYS = 3650
@@ -113,6 +119,7 @@ SENSOR_DISPLAY_NAMES = {
     "api_status": "Astra API Status",
     "last_successful_source": "Astra Last Successful Source",
     "web_session_status": "Astra Web Session Status",
+    "browser_proxy_status": "Astra Browser Proxy Status",
 }
 SENSOR_OBJECT_IDS = {
     "power": "astra_power",
@@ -148,6 +155,7 @@ SENSOR_OBJECT_IDS = {
     "api_status": "astra_api_status",
     "last_successful_source": "astra_last_successful_source",
     "web_session_status": "astra_web_session_status",
+    "browser_proxy_status": "astra_browser_proxy_status",
 }
 SENSOR_STATISTIC_LABELS = {
     "imported_energy": "grid energy",

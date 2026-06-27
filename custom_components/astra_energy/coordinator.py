@@ -23,6 +23,9 @@ from .api import (
 )
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+    CONF_BROWSER_PROXY_ENABLED,
+    CONF_BROWSER_PROXY_TOKEN,
+    CONF_BROWSER_PROXY_URL,
     CONF_GRID_PRICE_NET,
     CONF_MAX_INTERVAL_AVERAGE_KW,
     CONF_SMOOTH_INTERVAL_ANOMALIES,
@@ -35,6 +38,9 @@ from .const import (
     CONF_WEB_GRAPH_TOTAL_ID,
     CONF_WEB_SESSION_ID,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+    DEFAULT_BROWSER_PROXY_ENABLED,
+    DEFAULT_BROWSER_PROXY_TOKEN,
+    DEFAULT_BROWSER_PROXY_URL,
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
@@ -51,6 +57,7 @@ from .const import (
     ISSUE_WEB_SESSION,
     SENSOR_OBJECT_IDS,
 )
+from .browser_proxy import async_fetch_browser_proxy_readings
 from .reporting import async_create_issue, async_delete_issue, error_payload
 from .web_session import async_check_web_session
 
@@ -123,6 +130,13 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             "point_count": None,
             "response_bytes": None,
         }
+        self.browser_proxy_status: dict[str, str | int | None] = {
+            "status": "disabled",
+            "checked_at": None,
+            "message": None,
+            "url": None,
+            "reading_count": None,
+        }
         self._recorder_baselines_loaded = False
         self._last_mobile_success_at = None
 
@@ -149,6 +163,12 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             self.api_status = "deferred"
             self.last_error = error_payload(err)
             await self._async_update_web_session_status()
+            browser_proxy_readings = await self._async_browser_proxy_fallback_readings()
+            if browser_proxy_readings:
+                await async_delete_issue(self.hass, ISSUE_API_AUTH)
+                await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
+                await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
+                return browser_proxy_readings
             await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
             await async_create_issue(
                 self.hass,
@@ -237,6 +257,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         self.last_error = None
         self._last_mobile_success_at = now
         await self._async_update_web_session_status()
+        self._set_browser_proxy_status("idle")
         await async_delete_issue(self.hass, ISSUE_API_AUTH)
         await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
         await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
@@ -308,6 +329,106 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             return {}
         self.last_successful_source = "recorder"
         return {fallback.meter_id: fallback}
+
+    async def _async_browser_proxy_fallback_readings(
+        self,
+    ) -> dict[str, AstraMeterReading] | None:
+        """Return browser-proxy readings when the mobile API returns deferred data."""
+        if not self.config_entry.options.get(
+            CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
+        ):
+            self._set_browser_proxy_status("disabled")
+            return None
+        url = str(
+            self.config_entry.options.get(
+                CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL
+            )
+            or ""
+        ).rstrip("/")
+        if not url:
+            self._set_browser_proxy_status(
+                "not_configured", message="Astra browser proxy URL is empty"
+            )
+            return None
+
+        try:
+            readings = await async_fetch_browser_proxy_readings(
+                async_get_clientsession(self.hass),
+                url=url,
+                token=self.config_entry.options.get(
+                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
+                ),
+                grid_price_net=float(
+                    self.config_entry.options.get(
+                        CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET
+                    )
+                ),
+                solar_price_net=float(
+                    self.config_entry.options.get(
+                        CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET
+                    )
+                ),
+                tax_rate=float(
+                    self.config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE)
+                ),
+            )
+        except AstraApiError as err:
+            self._set_browser_proxy_status("error", message=str(err), url=url)
+            _LOGGER.warning("Astra browser proxy fallback failed: %s", err)
+            return None
+
+        now = dt_util.utcnow()
+        previous_readings = await self._async_previous_readings(readings)
+        live_elapsed_hours = _elapsed_hours(self._last_mobile_success_at, now)
+        max_average_kw = float(
+            self.config_entry.options.get(
+                CONF_MAX_INTERVAL_AVERAGE_KW,
+                DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+            )
+        )
+        normalized_readings = {}
+        for reading in readings:
+            live_previous = (self.data or {}).get(reading.meter_id)
+            if _has_implausible_live_jump(
+                reading,
+                live_previous,
+                max_average_kw=max_average_kw,
+                elapsed_hours=live_elapsed_hours,
+            ):
+                self._set_browser_proxy_status(
+                    "rejected",
+                    message="Browser proxy reading contains an implausible cumulative jump",
+                    url=url,
+                    reading_count=len(readings),
+                )
+                return None
+            previous = previous_readings.get(reading.meter_id) if previous_readings else None
+            normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
+
+        self.api_status = "browser_proxy"
+        self.last_successful_source = "browser_proxy"
+        self.last_error = None
+        self._set_browser_proxy_status(
+            "ok", url=url, reading_count=len(normalized_readings)
+        )
+        return normalized_readings
+
+    def _set_browser_proxy_status(
+        self,
+        status: str,
+        *,
+        message: str | None = None,
+        url: str | None = None,
+        reading_count: int | None = None,
+    ) -> None:
+        """Update redaction-safe browser proxy diagnostics."""
+        self.browser_proxy_status = {
+            "status": status,
+            "checked_at": datetime.now().isoformat(),
+            "message": message,
+            "url": url,
+            "reading_count": reading_count,
+        }
 
     async def _async_update_web_session_status(self) -> None:
         """Check the optional manual browser session and publish diagnostics."""

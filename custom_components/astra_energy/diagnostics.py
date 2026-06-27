@@ -5,7 +5,7 @@ from __future__ import annotations
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
-from .const import CONF_WEB_COOKIE, CONF_WEB_SESSION_ID, DOMAIN
+from .const import CONF_BROWSER_PROXY_TOKEN, CONF_WEB_COOKIE, CONF_WEB_SESSION_ID, DOMAIN
 
 TO_REDACT = {
     CONF_PASSWORD,
@@ -18,6 +18,7 @@ TO_REDACT = {
     "session_id",
     CONF_WEB_COOKIE,
     CONF_WEB_SESSION_ID,
+    CONF_BROWSER_PROXY_TOKEN,
     "raw_meter_id",
 }
 
@@ -35,6 +36,7 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         "api_status": coordinator.api_status,
         "last_successful_source": coordinator.last_successful_source,
         "web_session_status": coordinator.web_session_status,
+        "browser_proxy_status": coordinator.browser_proxy_status,
         "meters": [
             {
                 "meter_id": reading.meter_id,

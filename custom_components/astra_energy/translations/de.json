@@ -33,7 +33,10 @@
           "web_base_url": "Web-Graph-Basis-URL",
           "web_session_id": "Web-sessionId",
           "web_cookie": "Web-Cookie-Header",
-          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie",
+          "browser_proxy_enabled": "Browser-Proxy-Fallback aktivieren",
+          "browser_proxy_url": "Browser-Proxy-URL",
+          "browser_proxy_token": "Browser-Proxy-Bearer-Token"
         },
         "data_description": {
           "username": "Astra-Cockpit-Benutzername.",
@@ -56,7 +59,10 @@
           "web_base_url": "Astra-Webportal-Verzeichnis für Graphen. Standardwert beibehalten, sofern Astra den Portalpfad nicht ändert.",
           "web_session_id": "sessionId aus einer eingeloggten Astra-Web-URL. Wird im Konfigurationseintrag gespeichert und in Diagnosen redigiert.",
           "web_cookie": "Vollständiger Cookie-Header aus der eingeloggten Browser-Sitzung. Wird im Konfigurationseintrag gespeichert und in Diagnosen redigiert.",
-          "web_graph_total_id": "Astra-pm_graph.php-ID, mit der der Zugriff auf den Gesamtenergie-Graphen geprüft wird."
+          "web_graph_total_id": "Astra-pm_graph.php-ID, mit der der Zugriff auf den Gesamtenergie-Graphen geprüft wird.",
+          "browser_proxy_enabled": "Lokalen Persistent-Browser-Sidecar verwenden, wenn die mobile API verzögerte Daten liefert.",
+          "browser_proxy_url": "Basis-URL des lokalen Astra-Browser-Proxy-Sidecars.",
+          "browser_proxy_token": "Optionaler Bearer-Token für den Browser-Proxy. Wird im Konfigurationseintrag gespeichert und in Diagnosen redigiert."
         }
       },
       "reauth_confirm": {
@@ -91,7 +97,10 @@
           "web_base_url": "Web-Graph-Basis-URL",
           "web_session_id": "Web-sessionId",
           "web_cookie": "Web-Cookie-Header",
-          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie",
+          "browser_proxy_enabled": "Browser-Proxy-Fallback aktivieren",
+          "browser_proxy_url": "Browser-Proxy-URL",
+          "browser_proxy_token": "Browser-Proxy-Bearer-Token"
         },
         "data_description": {}
       }
@@ -119,7 +128,10 @@
           "web_base_url": "Web-Graph-Basis-URL",
           "web_session_id": "Web-sessionId",
           "web_cookie": "Web-Cookie-Header",
-          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie"
+          "web_graph_total_id": "Web-Graph-ID für Gesamtenergie",
+          "browser_proxy_enabled": "Browser-Proxy-Fallback aktivieren",
+          "browser_proxy_url": "Browser-Proxy-URL",
+          "browser_proxy_token": "Browser-Proxy-Bearer-Token"
         }
       }
     }
@@ -298,6 +310,9 @@
       },
       "web_session_status": {
         "name": "Web-Sitzungsstatus"
+      },
+      "browser_proxy_status": {
+        "name": "Browser-Proxy-Status"
       }
     }
   }

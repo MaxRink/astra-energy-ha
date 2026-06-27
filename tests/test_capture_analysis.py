@@ -152,6 +152,15 @@ web_session = importlib.util.module_from_spec(web_session_spec)
 sys.modules[web_session_spec.name] = web_session
 web_session_spec.loader.exec_module(web_session)
 
+browser_proxy_path = component_dir / "browser_proxy.py"
+browser_proxy_spec = importlib.util.spec_from_file_location(
+    "custom_components.astra_energy.browser_proxy", browser_proxy_path
+)
+assert browser_proxy_spec and browser_proxy_spec.loader
+browser_proxy = importlib.util.module_from_spec(browser_proxy_spec)
+sys.modules[browser_proxy_spec.name] = browser_proxy
+browser_proxy_spec.loader.exec_module(browser_proxy)
+
 sensor_path = component_dir / "sensor.py"
 sensor_spec = importlib.util.spec_from_file_location(
     "custom_components.astra_energy.sensor", sensor_path
@@ -1261,6 +1270,164 @@ def test_coordinator_deferred_update_checks_web_session_status(monkeypatch) -> N
     assert asyncio.run(coordinator._async_update_data()) == {}
     assert calls == ["web"]
     assert coordinator.web_session_status == {"status": "ok"}
+
+
+def test_browser_proxy_payload_maps_current_web_widget_values() -> None:
+    readings = browser_proxy.parse_browser_proxy_payload(
+        {
+            "ok": True,
+            "source": "astra_web_widget",
+            "fetched_at": "2026-06-27T15:50:00+02:00",
+            "meter": {
+                "meter_id": "1EBZ0103002978_0",
+                "raw_meter_id": "1EBZ0103002978/0",
+                "timestamp": "2026-06-27T15:45:00+02:00",
+                "total_kwh": 5664.484,
+                "grid_kwh": 4847.262,
+                "raw_grid_kwh": 4821.448,
+                "solar_kwh": 817.222,
+                "current_year_total_kwh": 2579.655,
+                "current_year_grid_kwh": 2076.757,
+                "current_year_solar_kwh": 493.796,
+            },
+        },
+        grid_price_net=0.294,
+        solar_price_net=0.21,
+        tax_rate=0.19,
+    )
+
+    reading = readings[0]
+    assert reading.meter_id == "1EBZ0103002978_0"
+    assert reading.raw_meter_id == "1EBZ0103002978/0"
+    assert reading.grid_kwh_total == 4847.262
+    assert reading.raw_grid_kwh_total == 4821.448
+    assert reading.solar_kwh_total == 817.222
+    assert reading.total_kwh == 5664.484
+    assert reading.current_year_grid_kwh == 2076.757
+    assert reading.current_year_solar_kwh == 493.796
+    assert reading.grid_price_gross_eur_per_kwh == pytest.approx(0.34986)
+    assert reading.raw["source"] == "browser_proxy"
+
+
+def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) -> None:
+    calls = []
+
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response checksum mismatch")
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def proxy_readings(*_args, **_kwargs):
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="1EBZ0103002978_0",
+                meter_name="Astra Energy Meter",
+                timestamp=dt.datetime(2026, 6, 27, 15, 45, tzinfo=ZoneInfo("Europe/Berlin")),
+                power_w=None,
+                imported_kwh_total=4847.262,
+                grid_kwh_total=4847.262,
+                solar_kwh_total=817.222,
+                total_kwh=5664.484,
+                raw={"source": "browser_proxy"},
+            )
+        ]
+
+    async def recorder_states(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["1EBZ0103002978_0"].total_kwh == 5664.484
+    assert coordinator.api_status == "browser_proxy"
+    assert coordinator.last_successful_source == "browser_proxy"
+    assert coordinator.browser_proxy_status["status"] == "ok"
+    assert [call[0] for call in calls] == ["delete", "delete", "delete"]
+
+
+def test_coordinator_deferred_update_keeps_deferred_when_browser_proxy_fails(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def proxy_readings(*_args, **_kwargs):
+        raise browser_proxy.AstraBrowserProxyError("Astra browser session is logged out")
+
+    async def recorder_states(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    assert asyncio.run(coordinator._async_update_data()) == {}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.browser_proxy_status["status"] == "error"
+    assert calls[-1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
 
 
 def test_coordinator_deferred_startup_uses_recorder_fallback(monkeypatch) -> None:

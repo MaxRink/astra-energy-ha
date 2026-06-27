@@ -56,6 +56,11 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
         translation_key="web_session_status",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    AstraCoordinatorSensorEntityDescription(
+        key="browser_proxy_status",
+        translation_key="browser_proxy_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 )
 
 _DEFERRED_UNAVAILABLE_STATE_CLASSES = {
@@ -456,6 +461,8 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
             return self.coordinator.last_successful_source
         if self.entity_description.key == "web_session_status":
             return self.coordinator.web_session_status.get("status")
+        if self.entity_description.key == "browser_proxy_status":
+            return self.coordinator.browser_proxy_status.get("status")
         return None
 
     @property
@@ -467,6 +474,8 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
             attributes["last_update_success"] = self.coordinator.last_update_success
         if self.entity_description.key == "web_session_status":
             attributes.update(self.coordinator.web_session_status)
+        if self.entity_description.key == "browser_proxy_status":
+            attributes.update(self.coordinator.browser_proxy_status)
         return attributes
 
     @property

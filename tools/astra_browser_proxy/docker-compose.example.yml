@@ -1,0 +1,24 @@
+services:
+  astra-browser-proxy:
+    build: .
+    container_name: astra-browser-proxy
+    restart: unless-stopped
+    ports:
+      - "43104:43104"
+      - "9222:9222"
+    volumes:
+      - astra-browser-profile:/profile
+    environment:
+      ASTRA_BIND: "0.0.0.0"
+      ASTRA_PORT: "43104"
+      ASTRA_PROFILE_DIR: "/profile"
+      ASTRA_HEADLESS: "false"
+      ASTRA_WEB_BASE_URL: "https://astra-cloud.com/astra04/readyxnet/source/pm"
+      ASTRA_LOGIN_URL: "https://astra-cloud.com/readyxnet/source/login/csloginw.php"
+      ASTRA_METER_ID: "1EBZ0103002978_0"
+      ASTRA_SHARED_TOKEN: ""
+      ASTRA_USERNAME: ""
+      ASTRA_PASSWORD: ""
+
+volumes:
+  astra-browser-profile:

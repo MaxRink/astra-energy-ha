@@ -33,7 +33,10 @@
           "web_base_url": "Web graph base URL",
           "web_session_id": "Web sessionId",
           "web_cookie": "Web Cookie header",
-          "web_graph_total_id": "Total energy web graph ID"
+          "web_graph_total_id": "Total energy web graph ID",
+          "browser_proxy_enabled": "Enable browser proxy fallback",
+          "browser_proxy_url": "Browser proxy URL",
+          "browser_proxy_token": "Browser proxy bearer token"
         },
         "data_description": {
           "username": "Astra Cockpit username.",
@@ -56,7 +59,10 @@
           "web_base_url": "Astra web portal graph directory. Keep the default unless Astra changes the portal path.",
           "web_session_id": "sessionId from a logged-in Astra web URL. Stored in the config entry and redacted from diagnostics.",
           "web_cookie": "Full Cookie header from the logged-in browser session. Stored in the config entry and redacted from diagnostics.",
-          "web_graph_total_id": "Astra pm_graph.php ID used to validate total-energy graph access."
+          "web_graph_total_id": "Astra pm_graph.php ID used to validate total-energy graph access.",
+          "browser_proxy_enabled": "Use the local persistent-browser sidecar when the mobile API returns deferred data.",
+          "browser_proxy_url": "Base URL of the local Astra browser proxy sidecar.",
+          "browser_proxy_token": "Optional bearer token required by the browser proxy. Stored in the config entry and redacted from diagnostics."
         }
       },
       "reauth_confirm": {
@@ -91,7 +97,10 @@
           "web_base_url": "Web graph base URL",
           "web_session_id": "Web sessionId",
           "web_cookie": "Web Cookie header",
-          "web_graph_total_id": "Total energy web graph ID"
+          "web_graph_total_id": "Total energy web graph ID",
+          "browser_proxy_enabled": "Enable browser proxy fallback",
+          "browser_proxy_url": "Browser proxy URL",
+          "browser_proxy_token": "Browser proxy bearer token"
         }
       }
     }
@@ -118,7 +127,10 @@
           "web_base_url": "Web graph base URL",
           "web_session_id": "Web sessionId",
           "web_cookie": "Web Cookie header",
-          "web_graph_total_id": "Total energy web graph ID"
+          "web_graph_total_id": "Total energy web graph ID",
+          "browser_proxy_enabled": "Enable browser proxy fallback",
+          "browser_proxy_url": "Browser proxy URL",
+          "browser_proxy_token": "Browser proxy bearer token"
         }
       }
     }
@@ -297,6 +309,9 @@
       },
       "web_session_status": {
         "name": "Web session status"
+      },
+      "browser_proxy_status": {
+        "name": "Browser proxy status"
       }
     }
   }

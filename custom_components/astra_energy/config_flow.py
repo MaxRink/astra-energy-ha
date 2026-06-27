@@ -16,6 +16,9 @@ from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
     CONF_BACKFILL_DAYS,
     CONF_BASE_URL,
+    CONF_BROWSER_PROXY_ENABLED,
+    CONF_BROWSER_PROXY_TOKEN,
+    CONF_BROWSER_PROXY_URL,
     CONF_CACHE_INTERVAL_PAYLOADS,
     CONF_GRID_PRICE_NET,
     CONF_HISTORY_GRANULARITY,
@@ -35,6 +38,9 @@ from .const import (
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_BASE_URL,
+    DEFAULT_BROWSER_PROXY_ENABLED,
+    DEFAULT_BROWSER_PROXY_TOKEN,
+    DEFAULT_BROWSER_PROXY_URL,
     DEFAULT_CACHE_INTERVAL_PAYLOADS,
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_HISTORY_GRANULARITY,
@@ -225,6 +231,22 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_WEB_GRAPH_TOTAL_ID,
                 default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
             ): str,
+            vol.Required(
+                CONF_BROWSER_PROXY_ENABLED,
+                default=defaults.get(
+                    CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_BROWSER_PROXY_URL,
+                default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
+            ): str,
+            vol.Optional(
+                CONF_BROWSER_PROXY_TOKEN,
+                default=defaults.get(
+                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
+                ),
+            ): str,
         }
     )
 
@@ -253,6 +275,13 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_WEB_COOKIE: str(user_input.get(CONF_WEB_COOKIE) or "").strip(),
         CONF_WEB_GRAPH_TOTAL_ID: str(
             user_input.get(CONF_WEB_GRAPH_TOTAL_ID) or DEFAULT_WEB_GRAPH_TOTAL_ID
+        ).strip(),
+        CONF_BROWSER_PROXY_ENABLED: user_input[CONF_BROWSER_PROXY_ENABLED],
+        CONF_BROWSER_PROXY_URL: str(
+            user_input.get(CONF_BROWSER_PROXY_URL) or DEFAULT_BROWSER_PROXY_URL
+        ).rstrip("/"),
+        CONF_BROWSER_PROXY_TOKEN: str(
+            user_input.get(CONF_BROWSER_PROXY_TOKEN) or DEFAULT_BROWSER_PROXY_TOKEN
         ).strip(),
     }
 
