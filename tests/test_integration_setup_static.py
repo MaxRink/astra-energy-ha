@@ -59,3 +59,14 @@ def test_backfill_service_accepts_days_alias() -> None:
     assert '_CONF_BACKFILL_DAYS_ALIASES = (CONF_BACKFILL_DAYS, "days")' in source
     assert 'vol.Optional("days")' in source
     assert "_service_value(" in source
+
+
+def test_options_flow_auto_reloads_config_entry() -> None:
+    """Options changes should not require a Home Assistant restart."""
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "astra_energy" / "config_flow.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class AstraEnergyOptionsFlow(config_entries.OptionsFlowWithReload):" in source
+    assert "data_schema=_options_schema(dict(self._config_entry.options))" in source
+    assert "data_schema=_data_schema(dict(self._config_entry.options))" not in source
