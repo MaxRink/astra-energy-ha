@@ -795,7 +795,7 @@ def test_captured_interval_catchup_does_not_weight_itself() -> None:
     )
 
 
-def test_interval_history_defers_failed_days() -> None:
+def test_interval_history_imports_available_days_when_other_days_fail() -> None:
     payload = {
         "auth": "1",
         "data": [
@@ -836,13 +836,18 @@ def test_interval_history_defers_failed_days() -> None:
     client._read_latest_meter_stands = fake_latest
     client._get_json = fake_get_json
 
-    with pytest.raises(astra_api.AstraDeferredDataError):
-        asyncio.run(
-            client.async_get_historical_interval_meter_stands(
-                dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
-                dt.datetime(2026, 6, 20, 0, 30, tzinfo=dt.UTC),
-            )
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 20, 0, 30, tzinfo=dt.UTC),
         )
+    )
+
+    assert [reading.timestamp for reading in readings] == [
+        dt.datetime(2026, 6, 19, 22, 15, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.UTC),
+    ]
+    assert [reading.total_kwh for reading in readings] == [100.25, 100.5]
 
 
 def test_interval_history_uses_cached_day_when_fetch_fails() -> None:
@@ -933,7 +938,7 @@ def test_interval_history_defers_without_cumulative_baseline() -> None:
     assert readings == []
 
 
-def test_interval_history_defers_when_requested_day_payload_is_missing() -> None:
+def test_interval_history_returns_empty_when_requested_day_payload_is_missing() -> None:
     client = astra_api.AstraClient(
         object(),
         username="user@example.test",
@@ -962,13 +967,14 @@ def test_interval_history_defers_when_requested_day_payload_is_missing() -> None
     client._read_latest_meter_stands = latest
     client._get_json = interval_payload
 
-    with pytest.raises(astra_api.AstraDeferredDataError):
-        asyncio.run(
-            client.async_get_historical_interval_meter_stands(
-                dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
-                dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
-            )
+    readings = asyncio.run(
+        client.async_get_historical_interval_meter_stands(
+            dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
         )
+    )
+
+    assert readings == []
 
 
 def test_interval_history_can_start_from_recorder_baseline() -> None:
@@ -1119,7 +1125,7 @@ def test_historical_backfill_deferred_error_does_not_create_repair_issue(monkeyp
     assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
 
 
-def test_historical_backfill_skips_statistics_import_when_live_api_is_deferred(
+def test_historical_backfill_allows_interval_fetch_when_live_api_is_deferred(
     monkeypatch,
 ) -> None:
     calls = []
@@ -1128,16 +1134,25 @@ def test_historical_backfill_skips_statistics_import_when_live_api_is_deferred(
         calls.append(("delete", args, kwargs))
 
     class Client:
-        async def async_get_historical_meter_stands(self, _start, _end):
-            raise AssertionError("deferred live state must block historical import")
-
         async def async_get_historical_interval_meter_stands(self, *_args, **_kwargs):
-            raise AssertionError("deferred live state must block interval import")
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=100.5,
+                    grid_kwh_total=100.5,
+                    solar_kwh_total=20.0,
+                    total_kwh=120.5,
+                )
+            ]
 
     coordinator = types.SimpleNamespace(
         api_status="deferred",
         client=Client(),
         config_entry=types.SimpleNamespace(options={}),
+        data={},
     )
 
     monkeypatch.setattr(statistics, "async_delete_issue", delete_issue)
@@ -1149,11 +1164,11 @@ def test_historical_backfill_skips_statistics_import_when_live_api_is_deferred(
             days=0,
             recent_refresh_hours=96,
             history_granularity=statistics.HISTORY_GRANULARITY_QUARTER_HOUR,
-            import_statistics=True,
+            import_statistics=False,
         )
     )
 
-    assert result == {}
+    assert result == {"meter_1": 1}
     assert [call[0] for call in calls] == ["delete"]
     assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
 
@@ -1346,6 +1361,11 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
         astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
     )
     monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_meter_id_from_entity_registry",
+        lambda _hass: "1EBZ0103002978_0",
+    )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
         hass=object(),
@@ -1425,6 +1445,11 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
         astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
     )
     monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_meter_id_from_entity_registry",
+        lambda _hass: "1EBZ0103002978_0",
+    )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
         hass=object(),
@@ -1456,7 +1481,7 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     assert "implausible cumulative jump" in coordinator.browser_proxy_status["message"]
 
 
-def test_coordinator_rejected_browser_proxy_startup_does_not_publish_recorder_fallback(
+def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     monkeypatch,
 ) -> None:
     class Client:
@@ -1497,6 +1522,11 @@ def test_coordinator_rejected_browser_proxy_startup_does_not_publish_recorder_fa
         astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
     )
     monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_meter_id_from_entity_registry",
+        lambda _hass: "1EBZ0103002978_0",
+    )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
         hass=object(),
@@ -1519,8 +1549,14 @@ def test_coordinator_rejected_browser_proxy_startup_does_not_publish_recorder_fa
 
     coordinator._async_update_web_session_status = web_status
 
-    assert asyncio.run(coordinator._async_update_data()) == {}
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["1EBZ0103002978_0"].grid_kwh_total == 4704.49785211269
+    assert result["1EBZ0103002978_0"].solar_kwh_total == 699.399147887309
+    assert result["1EBZ0103002978_0"].total_kwh == 5403.897
+    assert result["1EBZ0103002978_0"].raw == {"source": "recorder_fallback"}
     assert coordinator.api_status == "deferred"
+    assert coordinator.last_successful_source == "recorder"
     assert coordinator.browser_proxy_status["status"] == "rejected"
 
 

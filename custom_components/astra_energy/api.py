@@ -1467,10 +1467,14 @@ class AstraClient:
                 anomaly_report[key] = anomaly_report.get(key, 0) + value
             raw_points.extend(day_points)
         if anomaly_report.get("interval_fetch_failed"):
-            raise AstraDeferredDataError(
-                "Astra interval backfill deferred because one or more requested "
-                "daily payloads were unavailable"
+            _LOGGER.warning(
+                "Astra interval backfill is missing %s daily payload(s); importing %s "
+                "valid interval point(s)",
+                anomaly_report["interval_fetch_failed"],
+                len(raw_points),
             )
+            if not raw_points:
+                return []
         sanitized_points, sanitize_report = _sanitize_interval_points(
             raw_points,
             max_average_kw=max_average_kw,

@@ -170,7 +170,9 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
                 return browser_proxy_readings
             if self.browser_proxy_status.get("status") == "rejected":
-                return self.data or {}
+                if self.data:
+                    return self.data
+                return await self._async_recorder_fallback_readings(force=True)
             await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
             await async_create_issue(
                 self.hass,
@@ -306,11 +308,14 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 baseline_readings[reading.meter_id] = baseline
         return baseline_readings
 
-    async def _async_recorder_fallback_readings(self) -> dict[str, AstraMeterReading]:
+    async def _async_recorder_fallback_readings(
+        self, *, force: bool = False
+    ) -> dict[str, AstraMeterReading]:
         """Return recorder-backed readings when Astra defers during startup."""
-        if self._recorder_baselines_loaded:
+        if self._recorder_baselines_loaded and not force:
             return {}
-        self._recorder_baselines_loaded = True
+        if not force:
+            self._recorder_baselines_loaded = True
         meter_id = _meter_id_from_entity_registry(self.hass)
         if meter_id is None:
             return {}
