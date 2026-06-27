@@ -96,6 +96,15 @@ settings in the UI and creates diagnostic sensors plus repair issues when the
 stored session is missing, expired, logged out, unreachable, or returning
 malformed graph data.
 
+When the mobile API is deferred and web login is blocked by reCAPTCHA, the
+integration can use the local persistent-browser sidecar in
+`tools/astra_browser_proxy`. The sidecar keeps a browser profile and exposes a
+small local JSON API. Configure its base URL in the integration options under
+`browser_proxy_url`; options changes reload the integration automatically. Live
+cumulative values from this fallback are still checked against the last safe
+Home Assistant baseline, and large catch-up gaps are withheld instead of being
+published as one Energy Dashboard spike.
+
 Create sanitized API docs from the capture:
 
 ```sh
@@ -193,6 +202,11 @@ available as live entities only and are deliberately not imported into recorder
 statistics, because they preserve raw provider anomalies for inspection. Enable debug logging for
 `custom_components.astra_energy` to see API action timing, fetched-vs-cached day
 counts, and anomaly repair counters.
+Current live readings are subject to the same residential-scale guard. If Astra
+or the browser sidecar only returns a large cumulative catch-up after an outage,
+the integration keeps the cumulative Energy Dashboard sensors unavailable or at
+their last safe value until a proper historical import can fill the missing
+hours.
 
 Quality-scale tracking is in `docs/quality-scale.md`.
 

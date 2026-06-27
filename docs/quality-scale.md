@@ -19,7 +19,8 @@ checklist.
   discovery tooling are split into focused modules.
 - [ ] `config-flow-test-coverage`: local protocol tests exist; full HA config
   flow tests need the Home Assistant test harness.
-- [x] `config-flow`: setup, options, reauth, and reconfigure are UI based.
+- [x] `config-flow`: setup, reauth, reconfigure, and auto-reloading options are
+  UI based.
 - [x] `dependency-transparency`: no external Python dependency is required by
   the integration; it uses Home Assistant's aiohttp session.
 - [x] `docs-actions`: documented in README/API docs.
@@ -74,7 +75,7 @@ checklist.
 - [x] `docs-troubleshooting`: documented.
 - [x] `docs-use-cases`: documented.
 - [x] `dynamic-devices`: new meters are added when coordinator data changes.
-- [x] `entity-category`: no diagnostic/config entities are currently exposed.
+- [x] `entity-category`: coordinator status entities are marked diagnostic.
 - [x] `entity-device-class`: energy and power classes are assigned where
   possible.
 - [x] `entity-disabled-by-default`: exported energy and live power are disabled

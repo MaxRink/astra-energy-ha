@@ -169,6 +169,8 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
                 await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
                 return browser_proxy_readings
+            if self.browser_proxy_status.get("status") == "rejected":
+                return self.data or {}
             await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
             await async_create_issue(
                 self.hass,
@@ -218,12 +220,12 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         normalized_readings = {}
         for reading in readings:
             previous = previous_readings.get(reading.meter_id) if previous_readings else None
-            live_previous = (self.data or {}).get(reading.meter_id)
             if _has_implausible_live_jump(
                 reading,
-                live_previous,
+                previous,
                 max_average_kw=max_average_kw,
-                elapsed_hours=live_elapsed_hours,
+                elapsed_hours=_reading_elapsed_hours(reading, previous)
+                or live_elapsed_hours,
             ):
                 err = AstraDeferredDataError(
                     "Astra live meter payload contains an implausible cumulative jump"
@@ -388,12 +390,13 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         )
         normalized_readings = {}
         for reading in readings:
-            live_previous = (self.data or {}).get(reading.meter_id)
+            previous = previous_readings.get(reading.meter_id) if previous_readings else None
             if _has_implausible_live_jump(
                 reading,
-                live_previous,
+                previous,
                 max_average_kw=max_average_kw,
-                elapsed_hours=live_elapsed_hours,
+                elapsed_hours=_reading_elapsed_hours(reading, previous)
+                or live_elapsed_hours,
             ):
                 self._set_browser_proxy_status(
                     "rejected",
@@ -402,7 +405,6 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                     reading_count=len(readings),
                 )
                 return None
-            previous = previous_readings.get(reading.meter_id) if previous_readings else None
             normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
 
         self.api_status = "browser_proxy"
@@ -514,13 +516,69 @@ async def _async_recorder_baseline_states(
 
 
 def _max_statistic_states(rows_by_statistic_id: dict[str, list[dict]]) -> dict[str, float]:
-    """Return the maximum available state for each statistic id."""
+    """Return the maximum plausible available state for each statistic id."""
     states: dict[str, float] = {}
     for statistic_id, rows in rows_by_statistic_id.items():
-        present_states = [float(row["state"]) for row in rows if row.get("state") is not None]
+        present_states = _plausible_statistic_states(statistic_id, rows)
         if present_states:
             states[statistic_id] = max(present_states)
     return states
+
+
+def _plausible_statistic_states(statistic_id: str, rows: list[dict]) -> list[float]:
+    """Return statistic states after skipping implausible one-step jumps."""
+    plausible: list[float] = []
+    previous_state: float | None = None
+    previous_start: float | None = None
+    for row in sorted(rows, key=lambda item: item.get("start") or 0):
+        state = row.get("state")
+        if state is None:
+            continue
+        current_state = float(state)
+        current_start = _statistic_start_seconds(row.get("start"))
+        if (
+            previous_state is not None
+            and current_state > previous_state
+            and _statistic_delta_exceeds_limit(
+                current_state - previous_state,
+                previous_start,
+                current_start,
+            )
+        ):
+            _LOGGER.warning(
+                "Ignoring implausible Astra recorder baseline statistic=%s "
+                "previous=%s current=%s start=%s",
+                statistic_id,
+                previous_state,
+                current_state,
+                current_start,
+            )
+            continue
+        plausible.append(current_state)
+        previous_state = current_state
+        previous_start = current_start
+    return plausible
+
+
+def _statistic_delta_exceeds_limit(
+    delta: float,
+    previous_start: float | None,
+    current_start: float | None,
+) -> bool:
+    """Return whether a recorder delta is too large to trust as a baseline."""
+    return delta > _MAX_STARTUP_BASELINE_REPAIR_KWH
+
+
+def _statistic_start_seconds(value) -> float | None:
+    """Return a statistic row start as UNIX seconds when available."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    numeric = float(value)
+    if numeric > 10_000_000_000:
+        return numeric / 1000
+    return numeric
 
 
 def _elapsed_hours(start: datetime | None, end: datetime) -> float | None:
@@ -533,6 +591,16 @@ def _elapsed_hours(start: datetime | None, end: datetime) -> float | None:
     return elapsed
 
 
+def _reading_elapsed_hours(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading | None,
+) -> float | None:
+    """Return elapsed hours between provider timestamps when both are known."""
+    if previous is None or reading.timestamp is None or previous.timestamp is None:
+        return None
+    return _elapsed_hours(previous.timestamp, reading.timestamp)
+
+
 def _has_implausible_live_jump(
     reading: AstraMeterReading,
     previous: AstraMeterReading | None,
@@ -541,9 +609,13 @@ def _has_implausible_live_jump(
     elapsed_hours: float | None,
 ) -> bool:
     """Return whether a live cumulative update is too large to publish."""
-    if previous is None or elapsed_hours is None:
+    if previous is None:
         return False
-    max_delta = max_average_kw * max(elapsed_hours, 0.25)
+    max_delta = (
+        max_average_kw * max(elapsed_hours, 0.25)
+        if elapsed_hours is not None
+        else _MAX_STARTUP_BASELINE_REPAIR_KWH
+    )
     checks = (
         ("grid", reading.grid_kwh_total, previous.grid_kwh_total),
         ("imported", reading.imported_kwh_total, previous.imported_kwh_total),

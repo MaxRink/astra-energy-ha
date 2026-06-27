@@ -1376,6 +1376,154 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
     assert [call[0] for call in calls] == ["delete", "delete", "delete"]
 
 
+def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
+    monkeypatch,
+) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def create_issue(*_args, **_kwargs):
+        return None
+
+    async def proxy_readings(*_args, **_kwargs):
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="1EBZ0103002978_0",
+                meter_name="Astra Energy Meter",
+                timestamp=dt.datetime(2026, 6, 27, 16, 45, tzinfo=ZoneInfo("Europe/Berlin")),
+                power_w=None,
+                imported_kwh_total=4849.144,
+                grid_kwh_total=4849.144,
+                solar_kwh_total=817.222,
+                total_kwh=5666.366,
+                raw={"source": "browser_proxy"},
+            )
+        ]
+
+    async def recorder_states(*_args, **_kwargs):
+        return {}
+
+    previous = astra_api.AstraMeterReading(
+        meter_id="1EBZ0103002978_0",
+        meter_name="Astra Energy Meter",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=4704.49785211269,
+        grid_kwh_total=4704.49785211269,
+        solar_kwh_total=699.399147887309,
+        total_kwh=5403.897,
+        raw={"source": "recorder_fallback"},
+    )
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+                astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0,
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(hours=1),
+    )
+    coordinator.client = Client()
+    coordinator.data = {"1EBZ0103002978_0": previous}
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result == {"1EBZ0103002978_0": previous}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.browser_proxy_status["status"] == "rejected"
+    assert "implausible cumulative jump" in coordinator.browser_proxy_status["message"]
+
+
+def test_coordinator_rejected_browser_proxy_startup_does_not_publish_recorder_fallback(
+    monkeypatch,
+) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def create_issue(*_args, **_kwargs):
+        return None
+
+    async def proxy_readings(*_args, **_kwargs):
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="1EBZ0103002978_0",
+                meter_name="Astra Energy Meter",
+                timestamp=dt.datetime(2026, 6, 27, 16, 45, tzinfo=ZoneInfo("Europe/Berlin")),
+                power_w=None,
+                imported_kwh_total=4849.144,
+                grid_kwh_total=4849.144,
+                solar_kwh_total=817.222,
+                total_kwh=5666.366,
+                raw={"source": "browser_proxy"},
+            )
+        ]
+
+    async def recorder_states(*_args, **_kwargs):
+        return {
+            "sensor.astra_grid_energy": 4704.49785211269,
+            "sensor.astra_solar_energy": 699.399147887309,
+            "sensor.astra_total_energy": 5403.897,
+        }
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+                astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0,
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(hours=1),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    assert asyncio.run(coordinator._async_update_data()) == {}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.browser_proxy_status["status"] == "rejected"
+
+
 def test_coordinator_deferred_update_keeps_deferred_when_browser_proxy_fails(
     monkeypatch,
 ) -> None:
@@ -2880,6 +3028,43 @@ def test_recorder_baseline_uses_maximum_state_when_latest_is_polluted() -> None:
         "sensor.astra_grid_energy": 4784.3,
         "sensor.astra_solar_energy": 763.589,
         "sensor.astra_total_energy": 5547.188,
+    }
+
+
+def test_recorder_baseline_ignores_observed_one_hour_astra_spike() -> None:
+    assert astra_coordinator._max_statistic_states(
+        {
+            "sensor.astra_grid_energy": [
+                {"start": 1782565200000, "state": 4704.49785211269},
+                {"start": 1782568800000, "state": 4849.144},
+            ],
+            "sensor.astra_solar_energy": [
+                {"start": 1782565200000, "state": 699.399147887309},
+                {"start": 1782568800000, "state": 817.222},
+            ],
+            "sensor.astra_total_energy": [
+                {"start": 1782565200000, "state": 5403.897},
+                {"start": 1782568800000, "state": 5666.366},
+            ],
+        }
+    ) == {
+        "sensor.astra_grid_energy": 4704.49785211269,
+        "sensor.astra_solar_energy": 699.399147887309,
+        "sensor.astra_total_energy": 5403.897,
+    }
+
+
+def test_recorder_baseline_ignores_observed_long_gap_catchup_spike() -> None:
+    assert astra_coordinator._max_statistic_states(
+        {
+            "sensor.astra_total_energy": [
+                {"start": 1781456400.0, "state": 5403.8969999999972},
+                {"start": 1782565200.0, "state": 5403.897},
+                {"start": 1782568800.0, "state": 5666.366},
+            ],
+        }
+    ) == {
+        "sensor.astra_total_energy": 5403.897,
     }
 
 
