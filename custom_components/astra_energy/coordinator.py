@@ -170,9 +170,16 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
                 return browser_proxy_readings
             if self.browser_proxy_status.get("status") == "rejected":
-                if self.data:
-                    return self.data
-                return await self._async_recorder_fallback_readings(force=True)
+                fallback_readings = await self._async_recorder_fallback_readings(force=True)
+                if fallback_readings and self.data:
+                    return {
+                        meter_id: monotonic_reading(
+                            fallback,
+                            self.data.get(meter_id),
+                        )
+                        for meter_id, fallback in fallback_readings.items()
+                    }
+                return fallback_readings or self.data or {}
             await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
             await async_create_issue(
                 self.hass,
