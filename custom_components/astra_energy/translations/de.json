@@ -39,7 +39,7 @@
           "username": "Astra-Cockpit-Benutzername.",
           "password": "Astra-Cockpit-Passwort.",
           "base_url": "Android-API-Endpunkt. Standardwert beibehalten, sofern Astra den Server nicht ändert.",
-          "poll_interval": "Wie oft Home Assistant aktuelle Zählerstände von Astra abfragt. Standardwert: 900 Sekunden / 15 Minuten.",
+          "poll_interval": "Wie oft Home Assistant aktuelle Zählerstände von Astra abfragt. Standardwert: 3600 Sekunden / 1 Stunde.",
           "backfill_days": "Wie viele Tage beim Rückimport abgerufen werden.",
           "recent_refresh_hours": "Aktueller Überlappungszeitraum, der erneut abgerufen wird, falls Astra Werte nachträglich korrigiert.",
           "history_granularity": "Monatliche Zählerstände für effiziente Importe oder Viertelstunden-Energiebilanz für detaillierte Energy-Dashboard-Historie.",

@@ -51,6 +51,7 @@ AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
 _LOGGER = logging.getLogger(__name__)
 
 _CONF_BACKFILL_DAYS_ALIASES = (CONF_BACKFILL_DAYS, "days")
+_LEGACY_DEFAULT_POLL_INTERVAL = 900
 
 _SERVICE_SCHEMA = vol.Schema(
     {
@@ -92,6 +93,16 @@ def _service_value(data: dict, keys: tuple[str, ...] | str, default):
         if key in data:
             return data[key]
     return default
+
+
+def _normalize_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Move old default options to current safer defaults."""
+    if entry.options.get(CONF_POLL_INTERVAL) != _LEGACY_DEFAULT_POLL_INTERVAL:
+        return
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL},
+    )
 
 
 async def _async_backfill_history(
@@ -192,6 +203,7 @@ async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> 
 
 async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) -> bool:
     """Set up Astra Energy from a config entry."""
+    _normalize_entry_options(hass, entry)
     coordinator = AstraEnergyCoordinator(
         hass=hass,
         entry=entry,

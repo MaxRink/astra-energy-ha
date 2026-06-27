@@ -39,7 +39,7 @@
           "username": "Astra Cockpit username.",
           "password": "Astra Cockpit password.",
           "base_url": "Android API endpoint. Keep the default unless Astra changes servers.",
-          "poll_interval": "How often Home Assistant polls Astra for current meter readings. The default is 900 seconds / 15 minutes.",
+          "poll_interval": "How often Home Assistant polls Astra for current meter readings. The default is 3600 seconds / 1 hour.",
           "backfill_days": "How many days to fetch when running the backfill action.",
           "recent_refresh_hours": "How many recent hours to re-fetch when running the backfill action.",
           "history_granularity": "Use monthly meter stands for efficient imports or quarter-hour energy balance rows for detailed Energy Dashboard history.",

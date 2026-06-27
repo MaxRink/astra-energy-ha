@@ -2499,7 +2499,7 @@ def test_lifetime_cost_total_sensors_keep_state_class_for_existing_statistics() 
     )
 
 
-def test_deferred_recorder_fallback_total_sensors_are_unavailable() -> None:
+def test_deferred_recorder_fallback_total_sensors_remain_available() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="meter",
         meter_name="Astra Energy Meter",
@@ -2536,9 +2536,36 @@ def test_deferred_recorder_fallback_total_sensors_are_unavailable() -> None:
 
     assert energy_sensor.native_value == pytest.approx(5523.159996)
     assert cost_sensor.native_value == pytest.approx(1932.3328)
-    assert energy_sensor.available is False
-    assert cost_sensor.available is False
+    assert energy_sensor.available is True
+    assert cost_sensor.available is True
     assert price_sensor.available is True
+
+
+def test_deferred_provider_total_sensors_remain_unavailable() -> None:
+    reading = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5523.159996,
+        grid_kwh_total=5523.159996,
+        solar_kwh_total=1279.350281,
+        total_kwh=6802.510277,
+        raw={"source": "mobile"},
+    )
+    coordinator = types.SimpleNamespace(
+        data={"meter": reading},
+        api_status="deferred",
+    )
+    description = next(
+        description
+        for description in astra_sensor.SENSOR_DESCRIPTIONS
+        if description.key == "imported_energy"
+    )
+
+    sensor = astra_sensor.AstraEnergySensor(coordinator, "meter", description)
+
+    assert sensor.available is False
 
 
 def test_ok_total_sensors_remain_available() -> None:

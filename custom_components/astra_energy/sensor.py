@@ -62,6 +62,9 @@ _DEFERRED_UNAVAILABLE_STATE_CLASSES = {
     SensorStateClass.TOTAL,
     SensorStateClass.TOTAL_INCREASING,
 }
+_SAFE_DEFERRED_READING_SOURCES = {
+    "recorder_fallback",
+}
 
 
 SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
@@ -356,6 +359,11 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
             coordinator_available = True
         if not coordinator_available or self.reading is None:
             return False
+        if (
+            self.coordinator.api_status == "deferred"
+            and _is_safe_deferred_reading(self.reading)
+        ):
+            return True
         return not (
             self.coordinator.api_status == "deferred"
             and self.entity_description.state_class in _DEFERRED_UNAVAILABLE_STATE_CLASSES
@@ -408,6 +416,12 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
             "name": "Astra Energy Meter",
             "serial_number": reading.raw_meter_id if reading else self._meter_id,
         }
+
+
+def _is_safe_deferred_reading(reading: AstraMeterReading) -> bool:
+    """Return whether a deferred reading is a known-good local fallback."""
+    raw = reading.raw or {}
+    return raw.get("source") in _SAFE_DEFERRED_READING_SOURCES
 
 
 class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity):

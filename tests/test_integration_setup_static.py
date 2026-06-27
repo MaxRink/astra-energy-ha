@@ -39,6 +39,17 @@ def test_import_statistics_registers_scheduled_backfill() -> None:
     assert "_cancel_initial_backfill" in source
 
 
+def test_setup_normalizes_legacy_default_poll_interval() -> None:
+    """Existing entries created with the old default should move to hourly polling."""
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "astra_energy" / "__init__.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_LEGACY_DEFAULT_POLL_INTERVAL = 900" in source
+    assert "CONF_POLL_INTERVAL: DEFAULT_POLL_INTERVAL" in source
+    assert "_normalize_entry_options(hass, entry)" in source
+
+
 def test_backfill_service_accepts_days_alias() -> None:
     """Manual recovery should accept the short alias used by operators."""
     source = (

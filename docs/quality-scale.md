@@ -12,7 +12,7 @@ checklist.
 
 - [x] `action-setup`: no setup-time actions outside `async_setup_entry`; native
   backfill action is registered on entry setup and removed on unload.
-- [x] `appropriate-polling`: default polling is 300 seconds and configurable
+- [x] `appropriate-polling`: default polling is 3600 seconds and configurable
   from the UI.
 - [ ] `brands`: needs an official Home Assistant brands PR.
 - [x] `common-modules`: API, coordinator, statistics, entities, diagnostics, and
