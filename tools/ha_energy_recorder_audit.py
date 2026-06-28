@@ -66,6 +66,18 @@ class StatisticDelta:
     delta_state: float
 
 
+@dataclass(frozen=True)
+class SuspiciousStatisticRow:
+    """A recorder row that can be safely removed from a suspicious sequence."""
+
+    statistic_id: str
+    metadata_id: int
+    start_ts: float
+    state: float
+    sum: float
+    reason: str
+
+
 def statistic_ids_from_energy_prefs(path: Path) -> list[str]:
     """Read individual-device consumption statistic IDs from an Energy prefs JSON dump."""
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -159,6 +171,87 @@ def repair_statistic_gaps(conn: sqlite3.Connection, gaps: Sequence[StatisticGap]
     return inserted
 
 
+def find_suspicious_rows(
+    conn: sqlite3.Connection,
+    statistic_ids: Sequence[str],
+    *,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
+    max_delta_kwh: float = 2.0,
+) -> list[SuspiciousStatisticRow]:
+    """Find individual recorder rows that poison adjacent statistics deltas."""
+    rows = _load_rows(conn, statistic_ids, start_ts=start_ts, end_ts=end_ts)
+    result: list[SuspiciousStatisticRow] = []
+    for statistic_rows in _group_rows(rows):
+        middle_outlier_keys = _middle_outlier_keys(statistic_rows, max_delta_kwh)
+        for index, row in enumerate(statistic_rows):
+            previous = statistic_rows[index - 1] if index > 0 else None
+            row_key = (row.metadata_id, row.start_ts)
+            if row_key in middle_outlier_keys:
+                result.append(_suspicious_row(row, "middle_outlier"))
+                continue
+            if previous is None:
+                continue
+            previous_is_bad = _is_suspicious_delta(previous, row, max_delta_kwh)
+            if not previous_is_bad:
+                continue
+            previous_key = (previous.metadata_id, previous.start_ts)
+            if previous_key in middle_outlier_keys:
+                continue
+            delta_sum = row.sum - previous.sum
+            delta_state = row.state - previous.state
+            max_delta = max_delta_kwh * _elapsed_hours(previous, row)
+            if delta_sum > max_delta or delta_state > max_delta:
+                result.append(_suspicious_row(row, "positive_spike"))
+    return _deduplicate_suspicious_rows(result)
+
+
+def delete_suspicious_rows(
+    conn: sqlite3.Connection,
+    rows: Sequence[SuspiciousStatisticRow],
+) -> int:
+    """Delete confirmed suspicious recorder rows."""
+    deleted = 0
+    for row in _deduplicate_suspicious_rows(rows):
+        cursor = conn.execute(
+            """
+            DELETE FROM statistics
+            WHERE metadata_id = ? AND start_ts = ?
+            """,
+            (row.metadata_id, row.start_ts),
+        )
+        deleted += cursor.rowcount
+    return deleted
+
+
+def repair_suspicious_rows(
+    conn: sqlite3.Connection,
+    statistic_ids: Sequence[str],
+    *,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
+    max_delta_kwh: float = 2.0,
+    max_passes: int = 10,
+) -> int:
+    """Repeatedly remove confirmed suspicious rows until the series stabilizes."""
+    deleted = 0
+    for _ in range(max_passes):
+        rows = find_suspicious_rows(
+            conn,
+            statistic_ids,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            max_delta_kwh=max_delta_kwh,
+        )
+        if not rows:
+            break
+        deleted_now = delete_suspicious_rows(conn, rows)
+        if deleted_now == 0:
+            break
+        deleted += deleted_now
+    return deleted
+
+
 def _load_rows(
     conn: sqlite3.Connection,
     statistic_ids: Sequence[str],
@@ -197,12 +290,85 @@ def _load_rows(
     ]
 
 
+def _group_rows(rows: Sequence[StatisticRow]) -> Iterable[list[StatisticRow]]:
+    current_id: str | None = None
+    current_rows: list[StatisticRow] = []
+    for row in rows:
+        if current_id is not None and row.statistic_id != current_id:
+            yield current_rows
+            current_rows = []
+        current_id = row.statistic_id
+        current_rows.append(row)
+    if current_rows:
+        yield current_rows
+
+
 def _pairs(rows: Iterable[StatisticRow]) -> Iterable[tuple[StatisticRow, StatisticRow]]:
     previous: StatisticRow | None = None
     for row in rows:
         if previous is not None:
             yield previous, row
         previous = row
+
+
+def _middle_outlier_keys(
+    rows: Sequence[StatisticRow],
+    max_delta_kwh: float,
+) -> set[tuple[int, float]]:
+    keys = set()
+    for index in range(1, len(rows) - 1):
+        previous = rows[index - 1]
+        row = rows[index]
+        next_row = rows[index + 1]
+        if (
+            _is_suspicious_delta(previous, row, max_delta_kwh)
+            and _is_suspicious_delta(row, next_row, max_delta_kwh)
+            and not _is_suspicious_delta(previous, next_row, max_delta_kwh)
+            and next_row.state >= previous.state
+            and next_row.sum >= previous.sum
+        ):
+            keys.add((row.metadata_id, row.start_ts))
+    return keys
+
+
+def _is_suspicious_delta(
+    previous: StatisticRow,
+    current: StatisticRow,
+    max_delta_kwh: float,
+) -> bool:
+    delta_sum = current.sum - previous.sum
+    delta_state = current.state - previous.state
+    max_delta = max_delta_kwh * _elapsed_hours(previous, current)
+    return (
+        delta_sum < -0.001
+        or delta_state < -0.001
+        or delta_sum > max_delta
+        or delta_state > max_delta
+    )
+
+
+def _elapsed_hours(previous: StatisticRow, current: StatisticRow) -> float:
+    return max((current.start_ts - previous.start_ts) / 3600, 0.25)
+
+
+def _suspicious_row(row: StatisticRow, reason: str) -> SuspiciousStatisticRow:
+    return SuspiciousStatisticRow(
+        statistic_id=row.statistic_id,
+        metadata_id=row.metadata_id,
+        start_ts=row.start_ts,
+        state=row.state,
+        sum=row.sum,
+        reason=reason,
+    )
+
+
+def _deduplicate_suspicious_rows(
+    rows: Sequence[SuspiciousStatisticRow],
+) -> list[SuspiciousStatisticRow]:
+    result = {}
+    for row in rows:
+        result[(row.metadata_id, row.start_ts)] = row
+    return list(result.values())
 
 
 def _parse_time(value: str | None) -> float | None:
@@ -223,6 +389,12 @@ def main() -> int:
     parser.add_argument("--max-gap-hours", type=int, default=12)
     parser.add_argument("--max-delta-kwh", type=float, default=2.0)
     parser.add_argument("--apply", action="store_true", help="Insert interpolated gap rows")
+    parser.add_argument(
+        "--delete-suspicious",
+        action="store_true",
+        help="Delete confirmed outlier rows that create suspicious deltas",
+    )
+    parser.add_argument("--max-delete-passes", type=int, default=10)
     args = parser.parse_args()
 
     statistic_ids = list(args.statistic_id)
@@ -247,14 +419,32 @@ def main() -> int:
             end_ts=_parse_time(args.end),
             max_delta_kwh=args.max_delta_kwh,
         )
+        suspicious_rows = find_suspicious_rows(
+            conn,
+            statistic_ids,
+            start_ts=_parse_time(args.start),
+            end_ts=_parse_time(args.end),
+            max_delta_kwh=args.max_delta_kwh,
+        )
         result: dict[str, object] = {
             "statistic_ids": statistic_ids,
             "repairable_gaps": [gap.__dict__ for gap in gaps],
             "suspicious_deltas": [delta.__dict__ for delta in deltas],
+            "suspicious_rows": [row.__dict__ for row in suspicious_rows],
         }
         if args.apply:
             with conn:
                 result["inserted_rows"] = repair_statistic_gaps(conn, gaps)
+        if args.delete_suspicious:
+            with conn:
+                result["deleted_rows"] = repair_suspicious_rows(
+                    conn,
+                    statistic_ids,
+                    start_ts=_parse_time(args.start),
+                    end_ts=_parse_time(args.end),
+                    max_delta_kwh=args.max_delta_kwh,
+                    max_passes=args.max_delete_passes,
+                )
         print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

@@ -4,8 +4,11 @@ from pathlib import Path
 import sqlite3
 
 from tools.ha_energy_recorder_audit import (
+    delete_suspicious_rows,
     find_statistic_gaps,
     find_suspicious_deltas,
+    find_suspicious_rows,
+    repair_suspicious_rows,
     repair_statistic_gaps,
     statistic_ids_from_energy_prefs,
 )
@@ -73,7 +76,67 @@ def test_gap_repair_ignores_counter_decreases() -> None:
     assert deltas[0].delta_sum < 0
 
 
-def _fixture_db(*, next_state: float = 338.93, next_sum: float = 110.63) -> sqlite3.Connection:
+def test_suspicious_row_repair_deletes_middle_positive_outlier() -> None:
+    conn = _fixture_db(rows=[
+        (1, 1782399600.0, 100.0, 100.0),
+        (1, 1782403200.0, 450.0, 450.0),
+        (1, 1782406800.0, 101.0, 101.0),
+    ])
+
+    rows = find_suspicious_rows(conn, ["sensor.klimaanlage_energy"], max_delta_kwh=2.0)
+
+    assert [(row.start_ts, row.reason) for row in rows] == [(1782403200.0, "middle_outlier")]
+    with conn:
+        assert delete_suspicious_rows(conn, rows) == 1
+    assert find_suspicious_deltas(conn, ["sensor.klimaanlage_energy"], max_delta_kwh=2.0) == []
+    assert conn.execute("SELECT start_ts FROM statistics ORDER BY start_ts").fetchall() == [
+        (1782399600.0,),
+        (1782406800.0,),
+    ]
+
+
+def test_suspicious_row_repair_deletes_middle_negative_outlier() -> None:
+    conn = _fixture_db(rows=[
+        (1, 1782399600.0, 100.0, 100.0),
+        (1, 1782403200.0, 60.0, 60.0),
+        (1, 1782406800.0, 101.0, 101.0),
+    ])
+
+    with conn:
+        assert repair_suspicious_rows(
+            conn,
+            ["sensor.klimaanlage_energy"],
+            max_delta_kwh=2.0,
+        ) == 1
+
+    assert find_suspicious_deltas(conn, ["sensor.klimaanlage_energy"], max_delta_kwh=2.0) == []
+    assert conn.execute("SELECT start_ts FROM statistics ORDER BY start_ts").fetchall() == [
+        (1782399600.0,),
+        (1782406800.0,),
+    ]
+
+
+def test_suspicious_row_repair_keeps_unproven_negative_drop() -> None:
+    conn = _fixture_db(rows=[
+        (1, 1782399600.0, 450.0, 450.0),
+        (1, 1782403200.0, 101.0, 101.0),
+    ])
+
+    assert find_suspicious_rows(conn, ["sensor.klimaanlage_energy"], max_delta_kwh=2.0) == []
+    with conn:
+        assert repair_suspicious_rows(
+            conn,
+            ["sensor.klimaanlage_energy"],
+            max_delta_kwh=2.0,
+        ) == 0
+
+
+def _fixture_db(
+    *,
+    next_state: float = 338.93,
+    next_sum: float = 110.63,
+    rows: list[tuple[int, float, float, float]] | None = None,
+) -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.executescript(
         """
@@ -103,7 +166,8 @@ def _fixture_db(*, next_state: float = 338.93, next_sum: float = 110.63) -> sqli
         INSERT INTO statistics(metadata_id, start_ts, state, sum)
         VALUES (?, ?, ?, ?)
         """,
-        [
+        rows
+        or [
             (1, 1782399600.0, 335.43, 107.13),
             (1, 1782428400.0, next_state, next_sum),
         ],

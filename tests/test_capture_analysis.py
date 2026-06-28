@@ -2789,6 +2789,36 @@ def test_statistics_import_rows_drop_lower_state_and_sum() -> None:
     ]
 
 
+def test_statistics_import_rows_drop_implausible_sum_spike() -> None:
+    rows = [
+        {
+            "start": dt.datetime(2026, 6, 25, 22, 0, tzinfo=dt.UTC),
+            "state": 5600.0,
+            "sum": 5450.0,
+        },
+        {
+            "start": dt.datetime(2026, 6, 25, 23, 0, tzinfo=dt.UTC),
+            "state": 5011.0,
+            "sum": 5011.0,
+        },
+    ]
+
+    assert statistics._nondecreasing_statistics_rows(
+        rows,
+        value_attr="grid_kwh_total",
+        state_start=5010.0,
+        sum_start=5010.0,
+        previous_start=dt.datetime(2026, 6, 25, 21, 0, tzinfo=dt.UTC),
+        max_hourly_delta=50.0,
+    ) == [
+        {
+            "start": dt.datetime(2026, 6, 25, 23, 0, tzinfo=dt.UTC),
+            "state": 5011.0,
+            "sum": 5011.0,
+        },
+    ]
+
+
 def test_statistics_rows_apply_sum_offset_without_changing_state() -> None:
     rows = statistics._statistics_rows(
         [
@@ -3093,6 +3123,41 @@ def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
     assert rows == []
 
 
+def test_statistics_rows_resume_after_gap_without_resetting_sum() -> None:
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 28, 14, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=4869.496,
+                grid_kwh_total=4869.496,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 28, 15, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=4870.884,
+                grid_kwh_total=4870.884,
+            ),
+        ],
+        "grid_kwh_total",
+        state_start=4870.488635076522,
+        sum_start=134.9578995426582,
+        max_hourly_delta=50.0,
+    )
+
+    assert rows == [
+        {
+            "start": dt.datetime(2026, 6, 28, 15, 0, tzinfo=dt.UTC),
+            "state": 4870.884,
+            "sum": pytest.approx(135.35326446613627),
+        }
+    ]
+
+
 def test_statistics_rows_resume_after_overlap_exceeds_existing_state() -> None:
     rows = statistics._statistics_rows(
         [
@@ -3160,8 +3225,8 @@ def test_statistics_rows_skip_implausible_hourly_jump() -> None:
         max_hourly_delta=50.0,
     )
 
-    assert [row["state"] for row in rows] == [1000.0, 1000.0, 1001.0]
-    assert [row["sum"] for row in rows] == [0.0, 0.0, 1.0]
+    assert [row["state"] for row in rows] == [1000.0, 1001.0]
+    assert [row["sum"] for row in rows] == [0.0, 1.0]
 
 
 def test_statistics_rows_omit_provider_rollback_after_existing_spike() -> None:

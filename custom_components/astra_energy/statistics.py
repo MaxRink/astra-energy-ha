@@ -203,12 +203,6 @@ def _statistics_rows(
                     0.25,
                 )
                 if delta > max_hourly_delta * elapsed_hours:
-                    rows_by_start[start] = {
-                        "start": start,
-                        "state": previous_total,
-                        "sum": current_sum,
-                    }
-                    previous_timestamp = timestamp
                     skipped_spike += 1
                     continue
             current_sum += delta
@@ -236,16 +230,20 @@ def _nondecreasing_statistics_rows(
     value_attr: str,
     state_start: float | None,
     sum_start: float | None,
+    previous_start: datetime | None = None,
+    max_hourly_delta: float | None = None,
 ) -> list[dict]:
-    """Drop recorder rows that would move a cumulative statistic backwards."""
+    """Drop recorder rows that would move a cumulative statistic backwards or spike."""
     filtered: list[dict] = []
     previous_state = state_start
     previous_sum = sum_start
     dropped_state = 0
     dropped_sum = 0
+    dropped_spike = 0
     for row in rows:
         state = row.get("state")
         total_sum = row.get("sum")
+        start = row.get("start")
         if (
             previous_state is not None
             and state is not None
@@ -260,19 +258,44 @@ def _nondecreasing_statistics_rows(
         ):
             dropped_sum += 1
             continue
+        if (
+            max_hourly_delta is not None
+            and previous_sum is not None
+            and total_sum is not None
+            and total_sum - previous_sum
+            > max_hourly_delta * _elapsed_statistic_hours(previous_start, start)
+        ):
+            dropped_spike += 1
+            continue
         filtered.append(row)
         if state is not None:
             previous_state = state
         if total_sum is not None:
             previous_sum = total_sum
-    if dropped_state or dropped_sum:
+        if isinstance(start, datetime):
+            previous_start = start
+    if dropped_state or dropped_sum or dropped_spike:
         _LOGGER.warning(
-            "Dropped Astra statistic import rows attr=%s lower_state=%s lower_sum=%s",
+            (
+                "Dropped Astra statistic import rows attr=%s lower_state=%s "
+                "lower_sum=%s spike=%s"
+            ),
             value_attr,
             dropped_state,
             dropped_sum,
+            dropped_spike,
         )
     return filtered
+
+
+def _elapsed_statistic_hours(
+    previous_start: datetime | None,
+    current_start: Any,
+) -> float:
+    """Return elapsed recorder-statistic hours between two row starts."""
+    if not isinstance(previous_start, datetime) or not isinstance(current_start, datetime):
+        return 1.0
+    return max((current_start - previous_start).total_seconds() / 3600, 0.25)
 
 
 def _statistics_state_rows(
@@ -907,6 +930,15 @@ async def async_backfill_statistics(  # pragma: no cover
                     value_attr=channel_def.value_attr,
                     state_start=statistic_start.get("state"),
                     sum_start=statistic_start.get("sum"),
+                    previous_start=statistic_start.get("start"),
+                    max_hourly_delta=(
+                        coordinator.config_entry.options.get(
+                            CONF_MAX_INTERVAL_AVERAGE_KW,
+                            DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+                        )
+                        if channel_def.max_hourly_delta
+                        else None
+                    ),
                 )
             rows = [
                 _statistic_data(StatisticData, row)
