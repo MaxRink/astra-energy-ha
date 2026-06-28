@@ -3,11 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 import sqlite3
 
+import pytest
+
 from tools.ha_energy_recorder_audit import (
     delete_suspicious_rows,
     find_statistic_gaps,
     find_suspicious_deltas,
     find_suspicious_rows,
+    repair_counter_resets,
     repair_suspicious_rows,
     repair_statistic_gaps,
     statistic_ids_from_energy_prefs,
@@ -129,6 +132,56 @@ def test_suspicious_row_repair_keeps_unproven_negative_drop() -> None:
             ["sensor.klimaanlage_energy"],
             max_delta_kwh=2.0,
         ) == 0
+
+
+def test_counter_reset_repair_rebases_sum_after_gap() -> None:
+    conn = _fixture_db(rows=[
+        (1, 1782399600.0, 4870.488635076522, 134.9578995426582),
+        (1, 1782633600.0, 4869.496, 0.0),
+        (1, 1782637200.0, 4870.884, 1.38799999999992),
+        (1, 1782640800.0, 4872.58, 3.0839999999998327),
+    ])
+
+    with conn:
+        repairs = repair_counter_resets(conn, ["sensor.klimaanlage_energy"])
+
+    assert repairs[0].deleted_rows == 1
+    assert repairs[0].updated_rows == 2
+    rows = conn.execute(
+        """
+        SELECT start_ts, state, sum
+        FROM statistics
+        ORDER BY start_ts
+        """
+    ).fetchall()
+    assert rows[0] == (1782399600.0, 4870.488635076522, 134.9578995426582)
+    assert rows[1] == pytest.approx((1782637200.0, 4870.884, 135.3532644661361))
+    assert rows[2] == pytest.approx((1782640800.0, 4872.58, 137.04926446613602))
+
+
+def test_counter_reset_repair_rebases_positive_state_after_sum_reset() -> None:
+    conn = _fixture_db(rows=[
+        (1, 1782399600.0, 822.4833649234745, 85.84510045733782),
+        (1, 1782633600.0, 822.977, 0.0),
+        (1, 1782637200.0, 822.977190876351, 0.00019087635098458122),
+    ])
+
+    with conn:
+        repairs = repair_counter_resets(conn, ["sensor.klimaanlage_energy"])
+
+    assert repairs[0].deleted_rows == 0
+    assert repairs[0].updated_rows == 2
+    sums = [
+        row[0]
+        for row in conn.execute(
+            "SELECT sum FROM statistics ORDER BY start_ts"
+        ).fetchall()
+    ]
+    assert sums == pytest.approx([
+        85.84510045733782,
+        86.33873553386336,
+        86.33892641021434,
+    ])
 
 
 def _fixture_db(

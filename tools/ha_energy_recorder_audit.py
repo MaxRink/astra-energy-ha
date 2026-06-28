@@ -78,6 +78,15 @@ class SuspiciousStatisticRow:
     reason: str
 
 
+@dataclass(frozen=True)
+class CounterResetRepair:
+    """Recorder repair counts for one cumulative statistic."""
+
+    statistic_id: str
+    deleted_rows: int
+    updated_rows: int
+
+
 def statistic_ids_from_energy_prefs(path: Path) -> list[str]:
     """Read individual-device consumption statistic IDs from an Energy prefs JSON dump."""
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -252,6 +261,72 @@ def repair_suspicious_rows(
     return deleted
 
 
+def repair_counter_resets(
+    conn: sqlite3.Connection,
+    statistic_ids: Sequence[str],
+    *,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
+) -> list[CounterResetRepair]:
+    """Rebase rows after a recorder sum reset while preserving valid cumulative state."""
+    rows = _load_rows(conn, statistic_ids, start_ts=start_ts, end_ts=end_ts)
+    repairs: list[CounterResetRepair] = []
+    for statistic_rows in _group_rows(rows):
+        deleted_rows = 0
+        updated_rows = 0
+        repair_active = False
+        previous: StatisticRow | None = None
+        for row in statistic_rows:
+            if previous is None:
+                previous = row
+                continue
+            delta_sum = row.sum - previous.sum
+            delta_state = row.state - previous.state
+            if delta_sum < -0.001 or delta_state < -0.001:
+                repair_active = True
+            if not repair_active:
+                previous = row
+                continue
+            if delta_state < -0.001:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM statistics
+                    WHERE metadata_id = ? AND start_ts = ?
+                    """,
+                    (row.metadata_id, row.start_ts),
+                )
+                deleted_rows += cursor.rowcount
+                continue
+            expected_sum = previous.sum + delta_state
+            if abs(row.sum - expected_sum) > 0.000001:
+                cursor = conn.execute(
+                    """
+                    UPDATE statistics
+                    SET sum = ?
+                    WHERE metadata_id = ? AND start_ts = ?
+                    """,
+                    (expected_sum, row.metadata_id, row.start_ts),
+                )
+                updated_rows += cursor.rowcount
+                row = StatisticRow(
+                    statistic_id=row.statistic_id,
+                    metadata_id=row.metadata_id,
+                    start_ts=row.start_ts,
+                    state=row.state,
+                    sum=expected_sum,
+                )
+            previous = row
+        if previous is not None and (deleted_rows or updated_rows):
+            repairs.append(
+                CounterResetRepair(
+                    statistic_id=previous.statistic_id,
+                    deleted_rows=deleted_rows,
+                    updated_rows=updated_rows,
+                )
+            )
+    return repairs
+
+
 def _load_rows(
     conn: sqlite3.Connection,
     statistic_ids: Sequence[str],
@@ -394,6 +469,11 @@ def main() -> int:
         action="store_true",
         help="Delete confirmed outlier rows that create suspicious deltas",
     )
+    parser.add_argument(
+        "--repair-resets",
+        action="store_true",
+        help="Rebase rows after detected cumulative recorder sum resets",
+    )
     parser.add_argument("--max-delete-passes", type=int, default=10)
     args = parser.parse_args()
 
@@ -445,6 +525,17 @@ def main() -> int:
                     max_delta_kwh=args.max_delta_kwh,
                     max_passes=args.max_delete_passes,
                 )
+        if args.repair_resets:
+            with conn:
+                result["reset_repairs"] = [
+                    repair.__dict__
+                    for repair in repair_counter_resets(
+                        conn,
+                        statistic_ids,
+                        start_ts=_parse_time(args.start),
+                        end_ts=_parse_time(args.end),
+                    )
+                ]
         print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
