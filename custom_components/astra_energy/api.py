@@ -263,7 +263,7 @@ def monotonic_reading(
         and solar == reading.solar_kwh_total
         and total == reading.total_kwh
     ):
-        return reading
+        return _reading_with_period_context(reading, previous)
 
     repaired = replace(
         reading,
@@ -283,7 +283,179 @@ def monotonic_reading(
             },
         },
     )
-    return _reading_with_repriced_totals(repaired)
+    return _reading_with_period_context(_reading_with_repriced_totals(repaired), previous)
+
+
+def _reading_with_period_context(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading | None,
+) -> AstraMeterReading:
+    """Fill omitted period summaries from a previous reading in the same period."""
+    if previous is None or reading.timestamp is None or previous.timestamp is None:
+        return reading
+
+    month_values: dict[str, float | None] = {}
+    year_values: dict[str, float | None] = {}
+    same_month = (
+        reading.timestamp.year == previous.timestamp.year
+        and reading.timestamp.month == previous.timestamp.month
+    )
+    same_year = reading.timestamp.year == previous.timestamp.year
+    if same_month:
+        month_values = _advanced_period_values(reading, previous, "current_month")
+    if same_year:
+        year_values = _advanced_period_values(reading, previous, "current_year")
+
+    if not month_values and not year_values:
+        return reading
+
+    updated = replace(
+        reading,
+        current_month_grid_kwh=month_values.get(
+            "grid", reading.current_month_grid_kwh
+        ),
+        current_month_solar_kwh=month_values.get(
+            "solar", reading.current_month_solar_kwh
+        ),
+        current_month_total_kwh=month_values.get(
+            "total", reading.current_month_total_kwh
+        ),
+        current_month_raw_grid_kwh=month_values.get(
+            "raw_grid", reading.current_month_raw_grid_kwh
+        ),
+        current_year_grid_kwh=year_values.get("grid", reading.current_year_grid_kwh),
+        current_year_solar_kwh=year_values.get("solar", reading.current_year_solar_kwh),
+        current_year_total_kwh=year_values.get("total", reading.current_year_total_kwh),
+        current_year_raw_grid_kwh=year_values.get(
+            "raw_grid", reading.current_year_raw_grid_kwh
+        ),
+        autarky_percent=(
+            reading.autarky_percent
+            if reading.autarky_percent is not None or not same_year
+            else previous.autarky_percent
+        ),
+        pv_co2_savings_t=(
+            reading.pv_co2_savings_t
+            if reading.pv_co2_savings_t is not None or not same_year
+            else previous.pv_co2_savings_t
+        ),
+        raw={
+            **(reading.raw or {}),
+            "period_context_repair": {
+                "previous_timestamp": previous.timestamp.isoformat(),
+                "same_month": same_month,
+                "same_year": same_year,
+            },
+        },
+    )
+    return _reading_with_period_costs(updated)
+
+
+def _advanced_period_values(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading,
+    prefix: str,
+) -> dict[str, float | None]:
+    """Return period values advanced by the cumulative delta when missing."""
+    values: dict[str, float | None] = {}
+    for key, current, previous_total, previous_period in (
+        (
+            "grid",
+            _grid_total(reading),
+            _grid_total(previous),
+            getattr(previous, f"{prefix}_grid_kwh"),
+        ),
+        (
+            "solar",
+            reading.solar_kwh_total,
+            previous.solar_kwh_total,
+            getattr(previous, f"{prefix}_solar_kwh"),
+        ),
+        (
+            "total",
+            reading.total_kwh,
+            previous.total_kwh,
+            getattr(previous, f"{prefix}_total_kwh"),
+        ),
+        (
+            "raw_grid",
+            reading.raw_grid_kwh_total,
+            previous.raw_grid_kwh_total,
+            getattr(previous, f"{prefix}_raw_grid_kwh"),
+        ),
+    ):
+        if getattr(reading, f"{prefix}_{key}_kwh") is not None or previous_period is None:
+            continue
+        delta = _nonnegative_delta(current, previous_total)
+        values[key] = _round_or_none(previous_period + (delta or 0.0))
+    return values
+
+
+def _grid_total(reading: AstraMeterReading) -> float | None:
+    """Return the preferred grid/import cumulative total."""
+    return (
+        reading.grid_kwh_total
+        if reading.grid_kwh_total is not None
+        else reading.imported_kwh_total
+    )
+
+
+def _nonnegative_delta(current: float | None, previous: float | None) -> float | None:
+    """Return a non-negative cumulative delta when both values are known."""
+    if current is None or previous is None:
+        return None
+    return max(current - previous, 0.0)
+
+
+def _reading_with_period_costs(reading: AstraMeterReading) -> AstraMeterReading:
+    """Recalculate current month/year costs after period repair."""
+    month_grid_cost = _cost_gross(
+        reading.current_month_grid_kwh,
+        reading.grid_price_gross_eur_per_kwh,
+    )
+    month_solar_cost = _cost_gross(
+        reading.current_month_solar_kwh,
+        reading.solar_price_gross_eur_per_kwh,
+    )
+    year_grid_cost = _cost_gross(
+        reading.current_year_grid_kwh,
+        reading.grid_price_gross_eur_per_kwh,
+    )
+    year_solar_cost = _cost_gross(
+        reading.current_year_solar_kwh,
+        reading.solar_price_gross_eur_per_kwh,
+    )
+    return replace(
+        reading,
+        current_month_grid_cost_gross_eur=(
+            reading.current_month_grid_cost_gross_eur or month_grid_cost
+        ),
+        current_month_solar_cost_gross_eur=(
+            reading.current_month_solar_cost_gross_eur or month_solar_cost
+        ),
+        current_month_total_cost_gross_eur=(
+            reading.current_month_total_cost_gross_eur
+            or _sum_present_costs(month_grid_cost, month_solar_cost)
+        ),
+        current_year_grid_cost_gross_eur=(
+            reading.current_year_grid_cost_gross_eur or year_grid_cost
+        ),
+        current_year_solar_cost_gross_eur=(
+            reading.current_year_solar_cost_gross_eur or year_solar_cost
+        ),
+        current_year_total_cost_gross_eur=(
+            reading.current_year_total_cost_gross_eur
+            or _sum_present_costs(year_grid_cost, year_solar_cost)
+        ),
+    )
+
+
+def _sum_present_costs(*values: float | None) -> float | None:
+    """Return a rounded sum when at least one cost is present."""
+    present = [value for value in values if value is not None]
+    if not present:
+        return None
+    return _round_or_none(sum(present), 4)
 
 
 def _parse_number(value: Any) -> float | None:

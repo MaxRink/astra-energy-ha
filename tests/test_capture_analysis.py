@@ -3296,6 +3296,93 @@ def test_monotonic_reading_keeps_consistent_provider_reading() -> None:
     assert astra_api.monotonic_reading(provider, None) is provider
 
 
+def test_monotonic_reading_advances_same_month_context_when_fallback_omits_it() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 27, 12, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        raw_grid_kwh_total=110.0,
+        grid_price_gross_eur_per_kwh=0.35,
+        solar_price_gross_eur_per_kwh=0.25,
+        current_month_grid_kwh=40.0,
+        current_month_solar_kwh=10.0,
+        current_month_total_kwh=50.0,
+        current_month_raw_grid_kwh=45.0,
+        autarky_percent=20.0,
+        pv_co2_savings_t=0.1,
+    )
+    fallback = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 28, 12, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=103.0,
+        grid_kwh_total=103.0,
+        solar_kwh_total=21.5,
+        total_kwh=124.5,
+        raw_grid_kwh_total=114.0,
+        grid_price_gross_eur_per_kwh=0.35,
+        solar_price_gross_eur_per_kwh=0.25,
+        raw={"source": "browser_proxy"},
+    )
+
+    repaired = astra_api.monotonic_reading(fallback, previous)
+
+    assert repaired.current_month_grid_kwh == 43.0
+    assert repaired.current_month_solar_kwh == 11.5
+    assert repaired.current_month_total_kwh == 54.5
+    assert repaired.current_month_raw_grid_kwh == 49.0
+    assert repaired.current_month_grid_cost_gross_eur == 15.05
+    assert repaired.current_month_solar_cost_gross_eur == 2.875
+    assert repaired.current_month_total_cost_gross_eur == 17.925
+    assert repaired.autarky_percent == 20.0
+    assert repaired.pv_co2_savings_t == 0.1
+    assert repaired.raw["period_context_repair"]["same_month"] is True
+
+
+def test_monotonic_reading_does_not_carry_month_context_across_month_boundary() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 30, 23, 45, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        current_month_grid_kwh=40.0,
+        current_month_solar_kwh=10.0,
+        current_month_total_kwh=50.0,
+        current_year_grid_kwh=400.0,
+        current_year_solar_kwh=100.0,
+        current_year_total_kwh=500.0,
+    )
+    fallback = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=101.0,
+        grid_kwh_total=101.0,
+        solar_kwh_total=20.5,
+        total_kwh=121.5,
+    )
+
+    repaired = astra_api.monotonic_reading(fallback, previous)
+
+    assert repaired.current_month_grid_kwh is None
+    assert repaired.current_month_solar_kwh is None
+    assert repaired.current_month_total_kwh is None
+    assert repaired.current_year_grid_kwh == 401.0
+    assert repaired.current_year_solar_kwh == 100.5
+    assert repaired.current_year_total_kwh == 501.5
+
+
 def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
     provider = astra_api.AstraMeterReading(
         meter_id="TEST_TOTAL/0",
