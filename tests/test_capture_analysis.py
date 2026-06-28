@@ -1174,6 +1174,128 @@ def test_historical_backfill_allows_interval_fetch_when_live_api_is_deferred(
     assert calls[0][1][1] == statistics.ISSUE_BACKFILL_FAILED
 
 
+def test_interval_backfill_rewrites_recent_refresh_window(monkeypatch) -> None:
+    imported = []
+    start_calls = []
+
+    async def noop_async(*_args, **_kwargs):
+        return None
+
+    class FakeStatisticData:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeStatisticMetaData:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    recorder_models = types.ModuleType("homeassistant.components.recorder.models")
+    recorder_models.StatisticData = FakeStatisticData
+    recorder_models.StatisticMetaData = FakeStatisticMetaData
+    recorder_models.StatisticMeanType = types.SimpleNamespace(
+        ARITHMETIC="arithmetic",
+        NONE="none",
+    )
+    recorder_statistics = types.ModuleType("homeassistant.components.recorder.statistics")
+
+    def fake_import_statistics(_hass, metadata, rows):
+        imported.append((metadata, rows))
+
+    recorder_statistics.async_import_statistics = fake_import_statistics
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.models",
+        recorder_models,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        recorder_statistics,
+    )
+    monkeypatch.setattr(
+        statistics.dt_util,
+        "utcnow",
+        lambda: dt.datetime(2026, 6, 28, 13, 30, tzinfo=dt.UTC),
+    )
+
+    async def statistic_starts(_hass, statistic_ids, start, *, require_sum=False):
+        start_calls.append((set(statistic_ids), start, require_sum))
+        return {
+            statistic_id: {
+                "state": 100.0,
+                "sum": 1000.0,
+                "start": start - dt.timedelta(hours=1),
+            }
+            for statistic_id in statistic_ids
+        }
+
+    class Client:
+        async def async_get_historical_interval_meter_stands(self, *_args, **_kwargs):
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=dt.datetime(2026, 6, 24, 14, 30, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=101.0,
+                    grid_kwh_total=101.0,
+                    solar_kwh_total=21.0,
+                    total_kwh=122.0,
+                    raw_grid_kwh_total=101.0,
+                    grid_price_gross_eur_per_kwh=0.35,
+                    solar_price_gross_eur_per_kwh=0.25,
+                    total_cost_total_gross_eur=40.6,
+                ),
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=dt.datetime(2026, 6, 28, 12, 30, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=110.0,
+                    grid_kwh_total=110.0,
+                    solar_kwh_total=25.0,
+                    total_kwh=135.0,
+                    raw_grid_kwh_total=110.0,
+                    grid_price_gross_eur_per_kwh=0.35,
+                    solar_price_gross_eur_per_kwh=0.25,
+                    total_cost_total_gross_eur=44.75,
+                ),
+            ]
+
+    coordinator = types.SimpleNamespace(
+        api_status="ok",
+        client=Client(),
+        config_entry=types.SimpleNamespace(options={}),
+        data={},
+    )
+
+    monkeypatch.setattr(statistics, "_async_statistic_starts", statistic_starts)
+    monkeypatch.setattr(statistics, "_meter_id_from_entity_registry", lambda _hass: "meter_1")
+    monkeypatch.setattr(statistics, "async_delete_issue", noop_async)
+
+    result = asyncio.run(
+        statistics.async_backfill_statistics(
+            object(),
+            coordinator,
+            days=0,
+            recent_refresh_hours=96,
+            history_granularity=statistics.HISTORY_GRANULARITY_QUARTER_HOUR,
+            import_statistics=True,
+        )
+    )
+
+    rewrite_start = dt.datetime(2026, 6, 24, 14, 0, tzinfo=dt.UTC)
+    assert result == {"meter_1": 2}
+    assert any(call[1] == rewrite_start and call[2] is True for call in start_calls)
+    assert not any(
+        call[1] == dt.datetime(2026, 6, 28, 12, 0, 0, 1, tzinfo=dt.UTC)
+        for call in start_calls
+    )
+    assert imported
+    imported_statistic_ids = {item[0].kwargs["statistic_id"] for item in imported}
+    assert "sensor.astra_grid_energy" in imported_statistic_ids
+
+
 def test_historical_backfill_non_deferred_error_keeps_repair_issue(monkeypatch) -> None:
     calls = []
 

@@ -516,7 +516,7 @@ async def _async_interval_start_baseline(
     states = await _async_statistic_starts(
         hass,
         statistic_ids,
-        end + timedelta(microseconds=1),
+        start,
     )
     grid_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['imported_energy']}", {})
     solar_state = states.get(f"sensor.{SENSOR_OBJECT_IDS['solar_energy']}", {})
@@ -778,6 +778,12 @@ async def async_backfill_statistics(  # pragma: no cover
 
     statistic_channels = _statistic_channels_for_granularity(history_granularity)
     statistic_starts: dict[tuple[str, datetime], dict[str, float]] = {}
+    rewrite_start = (
+        _statistics_hour_start(end - timedelta(hours=recent_refresh_hours))
+        if history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR
+        and recent_refresh_hours > 0
+        else None
+    )
 
     for meter_id, meter_readings in grouped.items():
         if not meter_readings:
@@ -815,30 +821,52 @@ async def async_backfill_statistics(  # pragma: no cover
                 and aligned_import_start is not None
                 and aligned_import_end is not None
             ):
-                cache_key = (statistic_id, aligned_import_end)
-                if cache_key not in statistic_starts:
-                    starts = await _async_statistic_starts(
-                        hass,
-                        {statistic_id},
-                        aligned_import_end + timedelta(microseconds=1),
-                        require_sum=True,
-                    )
-                    statistic_starts[cache_key] = starts.get(statistic_id, {})
-                statistic_start = statistic_starts[cache_key]
-                existing_start = statistic_start.get("start")
-                if (
-                    isinstance(existing_start, datetime)
-                    and existing_start >= aligned_import_start
-                ):
-                    channel_readings = _readings_after_existing_start(
-                        meter_readings,
-                        channel_def.value_attr,
-                        existing_start=existing_start,
-                        existing_state=statistic_start.get("state"),
-                        align_to_hour=align_to_hour,
-                    )
-                    if not channel_readings:
-                        continue
+                if rewrite_start is not None and aligned_import_end >= rewrite_start:
+                    import_anchor = max(aligned_import_start, rewrite_start)
+                    cache_key = (statistic_id, import_anchor)
+                    if cache_key not in statistic_starts:
+                        starts = await _async_statistic_starts(
+                            hass,
+                            {statistic_id},
+                            import_anchor,
+                            require_sum=True,
+                        )
+                        statistic_starts[cache_key] = starts.get(statistic_id, {})
+                    statistic_start = statistic_starts[cache_key]
+                    existing_start = statistic_start.get("start")
+                    if isinstance(existing_start, datetime):
+                        channel_readings = _readings_after_existing_start(
+                            meter_readings,
+                            channel_def.value_attr,
+                            existing_start=existing_start,
+                            existing_state=statistic_start.get("state"),
+                            align_to_hour=align_to_hour,
+                        )
+                else:
+                    cache_key = (statistic_id, aligned_import_end)
+                    if cache_key not in statistic_starts:
+                        starts = await _async_statistic_starts(
+                            hass,
+                            {statistic_id},
+                            aligned_import_end + timedelta(microseconds=1),
+                            require_sum=True,
+                        )
+                        statistic_starts[cache_key] = starts.get(statistic_id, {})
+                    statistic_start = statistic_starts[cache_key]
+                    existing_start = statistic_start.get("start")
+                    if (
+                        isinstance(existing_start, datetime)
+                        and existing_start >= aligned_import_start
+                    ):
+                        channel_readings = _readings_after_existing_start(
+                            meter_readings,
+                            channel_def.value_attr,
+                            existing_start=existing_start,
+                            existing_state=statistic_start.get("state"),
+                            align_to_hour=align_to_hour,
+                        )
+                if not channel_readings:
+                    continue
             row_dicts = (
                 _statistics_rows(
                     channel_readings,
