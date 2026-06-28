@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import datetime as dt
 import importlib.util
+import logging
 import sys
 import types
 import asyncio
@@ -1294,8 +1295,8 @@ def test_browser_proxy_payload_maps_current_web_widget_values() -> None:
             "source": "astra_web_widget",
             "fetched_at": "2026-06-27T15:50:00+02:00",
             "meter": {
-                "meter_id": "1EBZ0103002978_0",
-                "raw_meter_id": "1EBZ0103002978/0",
+                "meter_id": "TEST_TOTAL_0",
+                "raw_meter_id": "TEST_TOTAL/0",
                 "timestamp": "2026-06-27T15:45:00+02:00",
                 "total_kwh": 5664.484,
                 "grid_kwh": 4847.262,
@@ -1312,8 +1313,8 @@ def test_browser_proxy_payload_maps_current_web_widget_values() -> None:
     )
 
     reading = readings[0]
-    assert reading.meter_id == "1EBZ0103002978_0"
-    assert reading.raw_meter_id == "1EBZ0103002978/0"
+    assert reading.meter_id == "TEST_TOTAL_0"
+    assert reading.raw_meter_id == "TEST_TOTAL/0"
     assert reading.grid_kwh_total == 4847.262
     assert reading.raw_grid_kwh_total == 4821.448
     assert reading.solar_kwh_total == 817.222
@@ -1340,7 +1341,7 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
     async def proxy_readings(*_args, **_kwargs):
         return [
             astra_api.AstraMeterReading(
-                meter_id="1EBZ0103002978_0",
+                meter_id="TEST_TOTAL_0",
                 meter_name="Astra Energy Meter",
                 timestamp=dt.datetime(2026, 6, 27, 15, 45, tzinfo=ZoneInfo("Europe/Berlin")),
                 power_w=None,
@@ -1364,7 +1365,7 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
     monkeypatch.setattr(
         astra_coordinator,
         "_meter_id_from_entity_registry",
-        lambda _hass: "1EBZ0103002978_0",
+        lambda _hass: "TEST_TOTAL_0",
     )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
@@ -1389,7 +1390,7 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["1EBZ0103002978_0"].total_kwh == 5664.484
+    assert result["TEST_TOTAL_0"].total_kwh == 5664.484
     assert coordinator.api_status == "browser_proxy"
     assert coordinator.last_successful_source == "browser_proxy"
     assert coordinator.browser_proxy_status["status"] == "ok"
@@ -1412,9 +1413,9 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     async def proxy_readings(*_args, **_kwargs):
         return [
             astra_api.AstraMeterReading(
-                meter_id="1EBZ0103002978_0",
+                meter_id="TEST_TOTAL_0",
                 meter_name="Astra Energy Meter",
-                timestamp=dt.datetime(2026, 6, 27, 16, 45, tzinfo=ZoneInfo("Europe/Berlin")),
+                timestamp=None,
                 power_w=None,
                 imported_kwh_total=4849.144,
                 grid_kwh_total=4849.144,
@@ -1428,7 +1429,7 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
         return {}
 
     previous = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978_0",
+        meter_id="TEST_TOTAL_0",
         meter_name="Astra Energy Meter",
         timestamp=None,
         power_w=None,
@@ -1448,7 +1449,7 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     monkeypatch.setattr(
         astra_coordinator,
         "_meter_id_from_entity_registry",
-        lambda _hass: "1EBZ0103002978_0",
+        lambda _hass: "TEST_TOTAL_0",
     )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
@@ -1466,7 +1467,7 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
         update_interval=dt.timedelta(hours=1),
     )
     coordinator.client = Client()
-    coordinator.data = {"1EBZ0103002978_0": previous}
+    coordinator.data = {"TEST_TOTAL_0": previous}
 
     async def web_status():
         coordinator.web_session_status = {"status": "disabled"}
@@ -1475,7 +1476,7 @@ def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result == {"1EBZ0103002978_0": previous}
+    assert result == {"TEST_TOTAL_0": previous}
     assert coordinator.api_status == "deferred"
     assert coordinator.browser_proxy_status["status"] == "rejected"
     assert "implausible cumulative jump" in coordinator.browser_proxy_status["message"]
@@ -1497,7 +1498,7 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     async def proxy_readings(*_args, **_kwargs):
         return [
             astra_api.AstraMeterReading(
-                meter_id="1EBZ0103002978_0",
+                meter_id="TEST_TOTAL_0",
                 meter_name="Astra Energy Meter",
                 timestamp=dt.datetime(2026, 6, 27, 16, 45, tzinfo=ZoneInfo("Europe/Berlin")),
                 power_w=None,
@@ -1525,7 +1526,7 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     monkeypatch.setattr(
         astra_coordinator,
         "_meter_id_from_entity_registry",
-        lambda _hass: "1EBZ0103002978_0",
+        lambda _hass: "TEST_TOTAL_0",
     )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
@@ -1551,10 +1552,10 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["1EBZ0103002978_0"].grid_kwh_total == 4704.49785211269
-    assert result["1EBZ0103002978_0"].solar_kwh_total == 699.399147887309
-    assert result["1EBZ0103002978_0"].total_kwh == 5403.897
-    assert result["1EBZ0103002978_0"].raw == {"source": "recorder_fallback"}
+    assert result["TEST_TOTAL_0"].grid_kwh_total == 4704.49785211269
+    assert result["TEST_TOTAL_0"].solar_kwh_total == 699.399147887309
+    assert result["TEST_TOTAL_0"].total_kwh == 5403.897
+    assert result["TEST_TOTAL_0"].raw == {"source": "recorder_fallback"}
     assert coordinator.api_status == "deferred"
     assert coordinator.last_successful_source == "recorder"
     assert coordinator.browser_proxy_status["status"] == "rejected"
@@ -1576,7 +1577,7 @@ def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
     async def proxy_readings(*_args, **_kwargs):
         return [
             astra_api.AstraMeterReading(
-                meter_id="1EBZ0103002978_0",
+                meter_id="TEST_TOTAL_0",
                 meter_name="Astra Energy Meter",
                 timestamp=dt.datetime(2026, 6, 27, 16, 45, tzinfo=ZoneInfo("Europe/Berlin")),
                 power_w=None,
@@ -1604,7 +1605,7 @@ def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
     monkeypatch.setattr(
         astra_coordinator,
         "_meter_id_from_entity_registry",
-        lambda _hass: "1EBZ0103002978_0",
+        lambda _hass: "TEST_TOTAL_0",
     )
 
     coordinator = astra_coordinator.AstraEnergyCoordinator(
@@ -1623,8 +1624,8 @@ def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
     )
     coordinator.client = Client()
     coordinator.data = {
-        "1EBZ0103002978_0": astra_api.AstraMeterReading(
-            meter_id="1EBZ0103002978_0",
+        "TEST_TOTAL_0": astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0",
             meter_name="Astra Energy Meter",
             timestamp=None,
             power_w=None,
@@ -1643,9 +1644,9 @@ def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["1EBZ0103002978_0"].grid_kwh_total == pytest.approx(4761.335545)
-    assert result["1EBZ0103002978_0"].solar_kwh_total == pytest.approx(733.492455)
-    assert result["1EBZ0103002978_0"].total_kwh == pytest.approx(5494.828)
+    assert result["TEST_TOTAL_0"].grid_kwh_total == pytest.approx(4761.335545)
+    assert result["TEST_TOTAL_0"].solar_kwh_total == pytest.approx(733.492455)
+    assert result["TEST_TOTAL_0"].total_kwh == pytest.approx(5494.828)
     assert coordinator.api_status == "deferred"
     assert coordinator.last_successful_source == "recorder"
     assert coordinator.browser_proxy_status["status"] == "rejected"
@@ -1726,7 +1727,7 @@ def test_coordinator_deferred_startup_uses_recorder_fallback(monkeypatch) -> Non
     monkeypatch.setattr(
         astra_coordinator,
         "_meter_id_from_entity_registry",
-        lambda _hass: "1EBZ0103002978_0",
+        lambda _hass: "TEST_TOTAL_0",
     )
     monkeypatch.setattr(
         astra_coordinator,
@@ -1756,7 +1757,7 @@ def test_coordinator_deferred_startup_uses_recorder_fallback(monkeypatch) -> Non
     coordinator._async_update_web_session_status = web_status
 
     result = asyncio.run(coordinator._async_update_data())
-    reading = result["1EBZ0103002978_0"]
+    reading = result["TEST_TOTAL_0"]
 
     assert coordinator.api_status == "deferred"
     assert coordinator.last_successful_source == "recorder"
@@ -1772,7 +1773,7 @@ def test_coordinator_update_uses_recorder_max_after_backfill(monkeypatch) -> Non
         async def async_get_meters(self):
             return [
                 astra_api.AstraMeterReading(
-                    meter_id="1EBZ0103002978_0",
+                    meter_id="TEST_TOTAL_0",
                     meter_name="Strom",
                     timestamp=dt.datetime(2026, 6, 26, 8, 0, tzinfo=dt.UTC),
                     power_w=None,
@@ -1810,8 +1811,8 @@ def test_coordinator_update_uses_recorder_max_after_backfill(monkeypatch) -> Non
     )
     coordinator.client = Client()
     coordinator.data = {
-        "1EBZ0103002978_0": astra_api.AstraMeterReading(
-            meter_id="1EBZ0103002978_0",
+        "TEST_TOTAL_0": astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0",
             meter_name="Strom",
             timestamp=dt.datetime(2026, 6, 26, 7, 0, tzinfo=dt.UTC),
             power_w=None,
@@ -1828,11 +1829,174 @@ def test_coordinator_update_uses_recorder_max_after_backfill(monkeypatch) -> Non
     coordinator._async_update_web_session_status = web_status
 
     result = asyncio.run(coordinator._async_update_data())
-    reading = result["1EBZ0103002978_0"]
+    reading = result["TEST_TOTAL_0"]
 
     assert reading.grid_kwh_total == pytest.approx(5594.919615)
     assert reading.solar_kwh_total == pytest.approx(1329.130662)
     assert reading.total_kwh == pytest.approx(6924.050277)
+
+
+def test_recorder_baseline_accepts_plausible_elapsed_catchup() -> None:
+    assert astra_coordinator._max_statistic_states(
+        {
+            "sensor.astra_total_energy": [
+                {"start": 1782630000.0, "state": 5494.828},
+                {"start": 1782712800.0, "state": 5688.105},
+            ],
+        }
+    ) == {
+        "sensor.astra_total_energy": 5688.105,
+    }
+
+
+def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider_data(
+    monkeypatch,
+) -> None:
+    class Client:
+        async def async_get_meters(self):
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="TEST_TOTAL_0",
+                    meter_name="Strom VGB",
+                    timestamp=dt.datetime(2026, 6, 28, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=4865.128,
+                    grid_kwh_total=4865.128,
+                    solar_kwh_total=822.977,
+                    total_kwh=5688.105,
+                    grid_price_gross_eur_per_kwh=0.34986,
+                    solar_price_gross_eur_per_kwh=0.2499,
+                    raw={"action": "get_mtr_lzs"},
+                )
+            ]
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def recorder_states(_hass, _statistic_ids):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_async_recorder_baseline_states",
+        recorder_states,
+    )
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0}
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(hours=1),
+    )
+    coordinator.client = Client()
+    coordinator.data = {
+        "TEST_TOTAL_0": astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0",
+            meter_name="Strom VGB",
+            timestamp=None,
+            power_w=None,
+            imported_kwh_total=4761.33554541505,
+            grid_kwh_total=4761.33554541505,
+            solar_kwh_total=733.492454584946,
+            total_kwh=5494.828,
+            raw={"source": "recorder_fallback"},
+        )
+    }
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+    reading = result["TEST_TOTAL_0"]
+
+    assert coordinator.api_status == "ok"
+    assert coordinator.last_successful_source == "mobile"
+    assert coordinator.last_error is None
+    assert reading.grid_kwh_total == pytest.approx(4865.128)
+    assert reading.solar_kwh_total == pytest.approx(822.977)
+    assert reading.total_kwh == pytest.approx(5688.105)
+
+
+def test_coordinator_still_rejects_implausible_recorder_fallback_recovery(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class Client:
+        async def async_get_meters(self):
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="TEST_TOTAL_0",
+                    meter_name="Strom VGB",
+                    timestamp=dt.datetime(2026, 6, 28, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=9761.33554541505,
+                    grid_kwh_total=9761.33554541505,
+                    solar_kwh_total=5733.492454584946,
+                    total_kwh=15494.828,
+                    raw={"action": "get_mtr_lzs"},
+                )
+            ]
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    async def recorder_states(_hass, _statistic_ids):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(
+        astra_coordinator,
+        "_async_recorder_baseline_states",
+        recorder_states,
+    )
+
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=4761.33554541505,
+        grid_kwh_total=4761.33554541505,
+        solar_kwh_total=733.492454584946,
+        total_kwh=5494.828,
+        raw={"source": "recorder_fallback"},
+    )
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0}
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(hours=1),
+    )
+    coordinator.client = Client()
+    coordinator.data = {"TEST_TOTAL_0": previous}
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result == {"TEST_TOTAL_0": previous}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_error["type"] == "AstraDeferredDataError"
+    assert calls[1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
 
 
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
@@ -1842,7 +2006,7 @@ def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) 
         async def async_get_meters(self):
             return [
                 astra_api.AstraMeterReading(
-                    meter_id="1EBZ0103002978_0",
+                    meter_id="TEST_TOTAL_0",
                     meter_name="Strom",
                     timestamp=dt.datetime(2026, 6, 26, 9, 13, tzinfo=dt.UTC),
                     power_w=None,
@@ -1871,7 +2035,7 @@ def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) 
     )
 
     previous = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978_0",
+        meter_id="TEST_TOTAL_0",
         meter_name="Strom",
         timestamp=dt.datetime(2026, 6, 26, 8, 58, tzinfo=dt.UTC),
         power_w=None,
@@ -1891,7 +2055,7 @@ def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) 
         update_interval=dt.timedelta(minutes=15),
     )
     coordinator.client = Client()
-    coordinator.data = {"1EBZ0103002978_0": previous}
+    coordinator.data = {"TEST_TOTAL_0": previous}
     coordinator.last_successful_source = "mobile"
     coordinator._last_mobile_success_at = astra_coordinator.dt_util.utcnow() - dt.timedelta(
         minutes=5
@@ -1904,7 +2068,7 @@ def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) 
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result == {"1EBZ0103002978_0": previous}
+    assert result == {"TEST_TOTAL_0": previous}
     assert coordinator.api_status == "deferred"
     assert coordinator.last_error["type"] == "AstraDeferredDataError"
     assert [call[0] for call in calls] == ["delete", "create"]
@@ -2674,6 +2838,47 @@ def test_statistics_rows_never_decrease_sum_when_meter_state_drops() -> None:
     assert [row["sum"] for row in rows] == [0.0]
 
 
+def test_statistics_rows_aggregate_repeated_rollbacks_in_one_warning(caplog) -> None:
+    caplog.set_level(logging.WARNING)
+
+    rows = statistics._statistics_rows(
+        [
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=200.0,
+                grid_kwh_total=200.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=150.0,
+                grid_kwh_total=150.0,
+            ),
+            astra_api.AstraMeterReading(
+                meter_id="meter_1",
+                meter_name="Main meter",
+                timestamp=dt.datetime(2026, 6, 19, 2, 0, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=175.0,
+                grid_kwh_total=175.0,
+            ),
+        ],
+        "grid_kwh_total",
+    )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert rows == [{"start": dt.datetime(2026, 6, 19, 0, 0, tzinfo=dt.UTC), "state": 200.0, "sum": 0.0}]
+    assert messages == [
+        "Skipped Astra statistic rows attr=grid_kwh_total negative=0 rollback=2 spike=0"
+    ]
+    assert all("previous=" not in message and "current=" not in message for message in messages)
+
+
 def test_statistics_rows_skip_existing_recorder_state_rollbacks() -> None:
     rows = statistics._statistics_rows(
         [
@@ -3093,7 +3298,7 @@ def test_monotonic_reading_keeps_consistent_provider_reading() -> None:
 
 def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
     provider = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL/0",
         meter_name="Strom",
         timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
         power_w=None,
@@ -3125,7 +3330,7 @@ def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
 
 def test_recorder_baseline_returns_none_without_statistics() -> None:
     reading = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL/0",
         meter_name="Strom",
         timestamp=None,
         power_w=None,
@@ -3195,9 +3400,33 @@ def test_recorder_baseline_ignores_observed_long_gap_catchup_spike() -> None:
     }
 
 
+def test_recorder_baseline_logs_repeated_implausible_rows_once(caplog) -> None:
+    caplog.set_level(logging.WARNING)
+
+    assert astra_coordinator._max_statistic_states(
+        {
+            "sensor.astra_total_energy": [
+                {"start": 1781456400.0, "state": 5403.8969999999972},
+                {"start": 1782565200.0, "state": 5403.897},
+                {"start": 1782568800.0, "state": 5666.366},
+                {"start": 1782572400.0, "state": 5800.0},
+            ],
+        }
+    ) == {
+        "sensor.astra_total_energy": 5403.897,
+    }
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "Ignoring implausible Astra recorder baseline rows "
+        "statistic=sensor.astra_total_energy count=2"
+    ]
+    assert all("previous=" not in message and "current=" not in message for message in messages)
+
+
 def test_recorder_baseline_rejects_implausible_polluted_counter_jump() -> None:
     provider = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL/0",
         meter_name="Strom",
         timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
         power_w=None,
@@ -3225,7 +3454,7 @@ def test_recorder_baseline_rejects_implausible_polluted_counter_jump() -> None:
 
 def test_recorder_baseline_holds_large_consistent_provider_rollback() -> None:
     provider = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL/0",
         meter_name="Strom",
         timestamp=dt.datetime(2026, 6, 25, 22, 31, tzinfo=dt.UTC),
         power_w=None,
@@ -3258,7 +3487,7 @@ def test_recorder_baseline_holds_large_consistent_provider_rollback() -> None:
 
 def test_recorder_baseline_derives_small_grid_rollback_from_cost_statistics() -> None:
     provider = astra_api.AstraMeterReading(
-        meter_id="1EBZ0103002978/0",
+        meter_id="TEST_TOTAL/0",
         meter_name="Strom",
         timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
         power_w=None,

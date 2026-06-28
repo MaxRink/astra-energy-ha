@@ -542,6 +542,7 @@ def _plausible_statistic_states(statistic_id: str, rows: list[dict]) -> list[flo
     plausible: list[float] = []
     previous_state: float | None = None
     previous_start: float | None = None
+    ignored_jumps = 0
     for row in sorted(rows, key=lambda item: item.get("start") or 0):
         state = row.get("state")
         if state is None:
@@ -557,18 +558,17 @@ def _plausible_statistic_states(statistic_id: str, rows: list[dict]) -> list[flo
                 current_start,
             )
         ):
-            _LOGGER.warning(
-                "Ignoring implausible Astra recorder baseline statistic=%s "
-                "previous=%s current=%s start=%s",
-                statistic_id,
-                previous_state,
-                current_state,
-                current_start,
-            )
+            ignored_jumps += 1
             continue
         plausible.append(current_state)
         previous_state = current_state
         previous_start = current_start
+    if ignored_jumps:
+        _LOGGER.warning(
+            "Ignoring implausible Astra recorder baseline rows statistic=%s count=%s",
+            statistic_id,
+            ignored_jumps,
+        )
     return plausible
 
 
@@ -578,6 +578,10 @@ def _statistic_delta_exceeds_limit(
     current_start: float | None,
 ) -> bool:
     """Return whether a recorder delta is too large to trust as a baseline."""
+    if previous_start is not None and current_start is not None:
+        elapsed_hours = (current_start - previous_start) / 3600
+        if elapsed_hours > 0:
+            return delta > _MAX_STARTUP_BASELINE_REPAIR_KWH * max(elapsed_hours, 1.0)
     return delta > _MAX_STARTUP_BASELINE_REPAIR_KWH
 
 
@@ -623,10 +627,11 @@ def _has_implausible_live_jump(
     """Return whether a live cumulative update is too large to publish."""
     if previous is None:
         return False
-    max_delta = (
-        max_average_kw * max(elapsed_hours, 0.25)
-        if elapsed_hours is not None
-        else _MAX_STARTUP_BASELINE_REPAIR_KWH
+    max_delta = _live_jump_limit(
+        reading,
+        previous,
+        max_average_kw=max_average_kw,
+        elapsed_hours=elapsed_hours,
     )
     checks = (
         ("grid", reading.grid_kwh_total, previous.grid_kwh_total),
@@ -649,6 +654,51 @@ def _has_implausible_live_jump(
             )
             return True
     return False
+
+
+def _live_jump_limit(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading,
+    *,
+    max_average_kw: float,
+    elapsed_hours: float | None,
+) -> float:
+    """Return the maximum cumulative delta that may be published."""
+    if elapsed_hours is not None:
+        return max_average_kw * max(elapsed_hours, 0.25)
+    if _is_recorder_fallback_recovery(reading, previous):
+        return _MAX_STARTUP_BASELINE_HOLD_KWH
+    return _MAX_STARTUP_BASELINE_REPAIR_KWH
+
+
+def _is_recorder_fallback_recovery(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading,
+) -> bool:
+    """Return whether a timestamped provider reading can recover stale fallback state."""
+    if reading.timestamp is None:
+        return False
+    if not previous.raw or previous.raw.get("source") != "recorder_fallback":
+        return False
+    if reading.total_kwh is None:
+        return False
+    source_sum = _source_sum(reading)
+    return (
+        source_sum is None
+        or abs(source_sum - reading.total_kwh) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
+    )
+
+
+def _source_sum(reading: AstraMeterReading) -> float | None:
+    """Return grid plus solar when both source counters are available."""
+    grid = (
+        reading.grid_kwh_total
+        if reading.grid_kwh_total is not None
+        else reading.imported_kwh_total
+    )
+    if grid is None or reading.solar_kwh_total is None:
+        return None
+    return grid + reading.solar_kwh_total
 
 
 def _meter_id_from_entity_registry(hass: HomeAssistant) -> str | None:

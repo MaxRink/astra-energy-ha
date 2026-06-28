@@ -1436,13 +1436,13 @@ class AstraClient:
                 except AstraApiError as err:
                     if cache_key in payload_cache:
                         cache_hits += 1
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Astra interval payload fetch failed for %s; using cached payload: %s",
                             day.isoformat(),
                             err,
                         )
                         return day, payload_cache[cache_key], {"interval_cache_fallback": 1}
-                    _LOGGER.warning(
+                    _LOGGER.debug(
                         "Astra interval payload fetch failed for %s: %s",
                         day.isoformat(),
                         err,

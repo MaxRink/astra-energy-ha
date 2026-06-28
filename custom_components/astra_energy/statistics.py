@@ -166,6 +166,9 @@ def _statistics_rows(
     previous_total: float | None = state_start
     previous_timestamp: datetime | None = None
     current_sum = sum_start
+    skipped_negative = 0
+    skipped_rollback = 0
+    skipped_spike = 0
     for reading in sorted(
         readings,
         key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
@@ -176,12 +179,7 @@ def _statistics_rows(
         timestamp = dt_util.as_utc(reading.timestamp)
         start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
         if total < 0:
-            _LOGGER.warning(
-                "Skipping Astra negative statistic attr=%s start=%s current=%s",
-                value_attr,
-                start,
-                total,
-            )
+            skipped_negative += 1
             continue
         if previous_total is not None:
             delta = total - previous_total
@@ -197,13 +195,7 @@ def _statistics_rows(
                     }
                     continue
                 previous_timestamp = timestamp
-                _LOGGER.warning(
-                    "Skipping Astra statistic rollback attr=%s start=%s previous=%s current=%s",
-                    value_attr,
-                    start,
-                    previous_total,
-                    total,
-                )
+                skipped_rollback += 1
                 continue
             if max_hourly_delta is not None and previous_timestamp is not None:
                 elapsed_hours = max(
@@ -217,13 +209,7 @@ def _statistics_rows(
                         "sum": current_sum,
                     }
                     previous_timestamp = timestamp
-                    _LOGGER.warning(
-                        "Skipping Astra statistic spike attr=%s start=%s delta=%s limit=%s",
-                        value_attr,
-                        start,
-                        delta,
-                        max_hourly_delta * elapsed_hours,
-                    )
+                    skipped_spike += 1
                     continue
             current_sum += delta
         previous_total = total
@@ -233,6 +219,14 @@ def _statistics_rows(
             "state": total,
             "sum": current_sum,
         }
+    if skipped_negative or skipped_rollback or skipped_spike:
+        _LOGGER.warning(
+            "Skipped Astra statistic rows attr=%s negative=%s rollback=%s spike=%s",
+            value_attr,
+            skipped_negative,
+            skipped_rollback,
+            skipped_spike,
+        )
     return list(rows_by_start.values())
 
 
@@ -247,6 +241,8 @@ def _nondecreasing_statistics_rows(
     filtered: list[dict] = []
     previous_state = state_start
     previous_sum = sum_start
+    dropped_state = 0
+    dropped_sum = 0
     for row in rows:
         state = row.get("state")
         total_sum = row.get("sum")
@@ -255,32 +251,27 @@ def _nondecreasing_statistics_rows(
             and state is not None
             and state < previous_state
         ):
-            _LOGGER.warning(
-                "Dropping Astra statistic row with lower state attr=%s start=%s previous=%s current=%s",
-                value_attr,
-                row.get("start"),
-                previous_state,
-                state,
-            )
+            dropped_state += 1
             continue
         if (
             previous_sum is not None
             and total_sum is not None
             and total_sum < previous_sum
         ):
-            _LOGGER.warning(
-                "Dropping Astra statistic row with lower sum attr=%s start=%s previous=%s current=%s",
-                value_attr,
-                row.get("start"),
-                previous_sum,
-                total_sum,
-            )
+            dropped_sum += 1
             continue
         filtered.append(row)
         if state is not None:
             previous_state = state
         if total_sum is not None:
             previous_sum = total_sum
+    if dropped_state or dropped_sum:
+        _LOGGER.warning(
+            "Dropped Astra statistic import rows attr=%s lower_state=%s lower_sum=%s",
+            value_attr,
+            dropped_state,
+            dropped_sum,
+        )
     return filtered
 
 
