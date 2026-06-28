@@ -1531,6 +1531,7 @@ class AstraClient:
         end: datetime,
         *,
         start_baseline: AstraMeterReading | None = None,
+        end_template: AstraMeterReading | None = None,
         payload_cache: dict[str, dict[str, Any]] | None = None,
         cache_before: datetime | None = None,
         max_average_kw: float | None = None,
@@ -1558,6 +1559,8 @@ class AstraClient:
 
         template = start_baseline
         forward_from_start = start_baseline is not None
+        if template is None and end_template is not None:
+            template = end_template
         if template is None:
             latest_readings: list[AstraMeterReading] = []
             try:

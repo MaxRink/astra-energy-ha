@@ -1296,6 +1296,70 @@ def test_interval_backfill_rewrites_recent_refresh_window(monkeypatch) -> None:
     assert "sensor.astra_grid_energy" in imported_statistic_ids
 
 
+def test_interval_backfill_uses_current_reading_when_recorder_baseline_missing(
+    monkeypatch,
+) -> None:
+    captured = {}
+    current = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 6, 28, 13, 30, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=110.0,
+        grid_kwh_total=110.0,
+        solar_kwh_total=25.0,
+        total_kwh=135.0,
+        raw={"source": "browser_proxy"},
+    )
+
+    class Client:
+        async def async_get_historical_interval_meter_stands(self, *_args, **kwargs):
+            captured.update(kwargs)
+            return [
+                astra_api.AstraMeterReading(
+                    meter_id="meter_1",
+                    meter_name="Main meter",
+                    timestamp=dt.datetime(2026, 6, 28, 12, 30, tzinfo=dt.UTC),
+                    power_w=None,
+                    imported_kwh_total=109.0,
+                    grid_kwh_total=109.0,
+                    solar_kwh_total=24.5,
+                    total_kwh=133.5,
+                )
+            ]
+
+    coordinator = types.SimpleNamespace(
+        api_status="browser_proxy",
+        client=Client(),
+        config_entry=types.SimpleNamespace(options={}),
+        data={"meter_1": current},
+    )
+
+    async def no_baseline(*_args, **_kwargs):
+        return None
+
+    async def noop_async(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(statistics, "_async_interval_start_baseline", no_baseline)
+    monkeypatch.setattr(statistics, "async_delete_issue", noop_async)
+
+    result = asyncio.run(
+        statistics.async_backfill_statistics(
+            object(),
+            coordinator,
+            days=0,
+            recent_refresh_hours=96,
+            history_granularity=statistics.HISTORY_GRANULARITY_QUARTER_HOUR,
+            import_statistics=False,
+        )
+    )
+
+    assert result == {"meter_1": 1}
+    assert captured["start_baseline"] is None
+    assert captured["end_template"] is current
+
+
 def test_historical_backfill_non_deferred_error_keeps_repair_issue(monkeypatch) -> None:
     calls = []
 

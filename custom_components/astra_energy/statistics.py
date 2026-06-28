@@ -661,10 +661,12 @@ async def async_backfill_statistics(  # pragma: no cover
             else start
         )
         try:
+            end_template = next(iter((coordinator.data or {}).values()), None)
             readings = await coordinator.client.async_get_historical_interval_meter_stands(
                 interval_start,
                 end,
                 start_baseline=start_baseline,
+                end_template=end_template,
                 payload_cache=payload_cache if use_cache else None,
                 cache_before=cache_before,
                 max_average_kw=(
