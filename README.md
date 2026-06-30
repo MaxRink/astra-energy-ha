@@ -214,3 +214,26 @@ Quality-scale tracking is in `docs/quality-scale.md`.
 
 Remove the integration from Settings → Devices & services, then delete
 `custom_components/astra_energy` and restart Home Assistant.
+
+### Advanced Configuration Options
+
+The following options can be configured during setup or via the integration options:
+
+- **`poll_interval`**: How often to poll live data (seconds).
+- **`backfill_days`**: Number of days to look back for historical data on startup.
+- **`recent_refresh_hours`**: Hours of recent history to continuously refresh.
+- **`history_granularity`**: Granularity of historical data (`quarter_hour`, `monthly`, etc).
+- **`import_statistics`**: Whether to import historical data into HA's long-term statistics.
+- **`grid_price_net`**: Net price per kWh for grid consumption.
+- **`solar_price_net`**: Net price per kWh for solar/object consumption.
+- **`tax_rate`**: Tax rate applied to net prices.
+- **`max_interval_average_kw`**: Maximum expected average kW per interval (anomalies above this are smoothed).
+- **`smooth_interval_anomalies`**: Enable/disable automatic smoothing of unrealistic spikes.
+- **`anomaly_redistribution_window`**: Number of buckets to spread smoothed anomalies across.
+- **`smoothing_lookaround_days`**: Number of days to use for estimating missing/smoothed intervals.
+- **`cache_interval_payloads`**: Cache large interval payloads on disk for debugging.
+- **`web_fallback_enabled`**: Use web session as fallback if API fails.
+- **`web_base_url`**: Base URL for web fallback.
+- **`web_session_id`** / **`web_cookie`**: Session/cookie for web fallback.
+- **`browser_proxy_enabled`**: Use an external browser proxy sidecar for data retrieval.
+- **`browser_proxy_url`** / **`browser_proxy_token`**: Endpoint and auth token for the browser proxy.
