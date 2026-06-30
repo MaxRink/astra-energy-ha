@@ -1820,7 +1820,7 @@ class AstraClient:
 
     async def _read_monthly_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-month medium metrics from Astra."""
-        today = datetime.now(UTC).date()
+        today = datetime.now(ASTRA_TIME_ZONE).date()
         try:
             data = await self._get_json(
                 "get_mtr_vbmed",
