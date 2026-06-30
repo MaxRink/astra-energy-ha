@@ -767,6 +767,10 @@ def test_single_channel_midnight_spike_does_not_weight_itself() -> None:
     assert sanitized[-1]["unsmoothed_solar_kwh"] == 14.75
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).parents[1] / "captures" / "astra-raw-15min-2026-06-19.json").exists(),
+    reason="Missing local capture file",
+)
 def test_captured_interval_catchup_does_not_weight_itself() -> None:
     payload_path = Path(__file__).parents[1] / "captures" / "astra-raw-15min-2026-06-19.json"
     payload = json.loads(payload_path.read_text())["actions"]["get_mtr_eb"]["payload"]
