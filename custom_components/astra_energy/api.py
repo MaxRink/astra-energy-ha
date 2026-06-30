@@ -487,7 +487,7 @@ def _parse_datetime(value: Any) -> datetime | None:
     text = str(value).strip()
     for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(text, fmt).replace(tzinfo=UTC)
+            return datetime.strptime(text, fmt).replace(tzinfo=ASTRA_TIME_ZONE).astimezone(UTC)
         except ValueError:
             continue
     return None
