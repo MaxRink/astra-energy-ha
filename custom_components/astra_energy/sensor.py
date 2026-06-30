@@ -128,15 +128,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
     ),
     AstraSensorEntityDescription(
-        key="exported_energy",
-        translation_key="exported_energy",
-        value_attr="exported_kwh_total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        entity_registry_enabled_default=False,
-    ),
-    AstraSensorEntityDescription(
         key="raw_grid_energy",
         translation_key="raw_grid_energy",
         value_attr="raw_grid_kwh_total",
