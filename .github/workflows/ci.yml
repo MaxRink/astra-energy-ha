@@ -27,6 +27,14 @@ jobs:
           # The existing code is clean under 0.15.20.
           python -m pip install pytest pytest-cov 'ruff>=0.15.20,<0.16' pyyaml
 
+      - name: Hassfest validation
+        uses: homeassistant/actions/hassfest@v1
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
       - name: Lint
         run: ruff check .
 
