@@ -30,7 +30,7 @@ jobs:
 
       - name: Syntax and metadata checks
         run: |
-          python -m py_compile custom_components/astra_energy/*.py tools/*.py
+          python -m compileall custom_components tools
           python -m json.tool custom_components/astra_energy/manifest.json >/dev/null
           python -m json.tool custom_components/astra_energy/translations/en.json >/dev/null
           python -m json.tool custom_components/astra_energy/translations/de.json >/dev/null
