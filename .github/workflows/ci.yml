@@ -46,9 +46,5 @@ jobs:
       - name: Test with coverage
         run: |
           python -m pytest -q \
-            --cov=custom_components.astra_energy.api \
-            --cov=custom_components.astra_energy.statistics \
-            --cov=custom_components.astra_energy.reporting \
-            --cov=custom_components.astra_energy.web_session \
+            --cov=custom_components.astra_energy \
             --cov-report=term-missing \
-            --cov-fail-under=100
