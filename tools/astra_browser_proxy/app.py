@@ -373,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
             if CONFIG.bind == "127.0.0.1":
                 return True
             return False
-        return self.headers.get("Authorization") == f"Bearer {CONFIG.shared_token}" 
+        return self.headers.get("Authorization") == f"Bearer {CONFIG.shared_token}"
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, sort_keys=True).encode()
