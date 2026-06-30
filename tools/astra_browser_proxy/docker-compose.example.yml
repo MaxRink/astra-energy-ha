@@ -9,7 +9,7 @@ services:
     volumes:
       - astra-browser-profile:/profile
     environment:
-      ASTRA_BIND: "0.0.0.0"
+      ASTRA_BIND: "127.0.0.1"
       ASTRA_PORT: "43104"
       ASTRA_PROFILE_DIR: "/profile"
       ASTRA_HEADLESS: "false"
