@@ -163,12 +163,7 @@ async def _async_background_backfill(hass: HomeAssistant, call: ServiceCall) -> 
     await _async_backfill_history(hass, call)
 
 
-async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator) -> None:
-    """Run the initial provider update without blocking config-entry setup."""
-    try:
-        await coordinator.async_refresh()
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Astra Energy initial refresh failed")
+
 
 
 async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> None:
@@ -218,13 +213,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
     coordinator.data = coordinator.data or {}
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
+    await coordinator.async_config_entry_first_refresh()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    initial_refresh_task = hass.async_create_task(_async_background_initial_refresh(coordinator))
-
-    def _cancel_initial_refresh() -> None:
-        initial_refresh_task.cancel()
-
-    entry.async_on_unload(_cancel_initial_refresh)
 
     if entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS):
 
@@ -239,10 +230,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
         )
 
         async def _async_run_initial_backfill() -> None:
-            try:
-                await initial_refresh_task
-            except asyncio.CancelledError:
-                return
             await _async_run_configured_backfill(hass, entry.entry_id)
 
         initial_backfill_task = hass.async_create_task(_async_run_initial_backfill())
