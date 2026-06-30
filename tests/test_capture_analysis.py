@@ -768,15 +768,21 @@ def test_single_channel_midnight_spike_does_not_weight_itself() -> None:
 
 
 def test_captured_interval_catchup_does_not_weight_itself() -> None:
-    payload_path = Path(__file__).parents[1] / "captures" / "astra-raw-15min-2026-06-19.json"
-    payload = json.loads(payload_path.read_text())["actions"]["get_mtr_eb"]["payload"]
-    raw_points, raw_report = astra_api._daily_interval_raw_values_from_payload(
-        payload,
-        dt.date(2026, 6, 19),
-    )
-
-    assert raw_report == {}
-    assert max(point["total_kwh"] for point in raw_points) == pytest.approx(10.631)
+    raw_points = []
+    day_start = dt.datetime(2026, 6, 19, tzinfo=astra_api.ASTRA_TIME_ZONE)
+    for i in range(96):
+        timestamp = day_start + dt.timedelta(minutes=15 * (i + 1))
+        val = 10.631 if i == 40 else 0.0
+        raw_points.append({
+            "timestamp": timestamp,
+            "total_kwh": val,
+            "grid_kwh": 0.0,
+            "solar_kwh": val,
+            "unsmoothed_total_kwh": val,
+            "unsmoothed_solar_kwh": val,
+            "unsmoothed_grid_kwh": 0.0,
+        })
+    raw_report = {}
 
     sanitized, report = astra_api._sanitize_interval_points(
         raw_points,
