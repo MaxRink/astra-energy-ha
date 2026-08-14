@@ -768,7 +768,7 @@ def test_single_channel_midnight_spike_does_not_weight_itself() -> None:
 
 
 def test_captured_interval_catchup_does_not_weight_itself() -> None:
-    payload_path = Path(__file__).parents[1] / "captures" / "astra-raw-15min-2026-06-19.json"
+    payload_path = Path(__file__).parent / "fixtures" / "astra_raw_15min_catchup_day.json"
     payload = json.loads(payload_path.read_text())["actions"]["get_mtr_eb"]["payload"]
     raw_points, raw_report = astra_api._daily_interval_raw_values_from_payload(
         payload,
@@ -4424,3 +4424,177 @@ def test_web_session_check_reports_valid_cookie_session() -> None:
     assert status.status == "ok"
     assert status.point_count == 1
     assert session.calls[0][1]["headers"]["Cookie"] == "sid=secret"
+
+
+def test_nonnegative_delta_clamps_meter_rollback() -> None:
+    assert astra_api._nonnegative_delta(10.5, 10.0) == pytest.approx(0.5)
+    assert astra_api._nonnegative_delta(9.5, 10.0) == 0.0
+    assert astra_api._nonnegative_delta(None, 10.0) is None
+    assert astra_api._nonnegative_delta(10.0, None) is None
+
+
+def test_statistics_import_rows_drop_lower_sum_with_rising_state() -> None:
+    rows = [
+        {
+            "start": dt.datetime(2026, 6, 25, 22, 0, tzinfo=dt.UTC),
+            "state": 5525.0,
+            "sum": 4980.0,
+        },
+        {
+            "start": dt.datetime(2026, 6, 25, 23, 0, tzinfo=dt.UTC),
+            "state": 5526.0,
+            "sum": 4984.0,
+        },
+    ]
+
+    assert statistics._nondecreasing_statistics_rows(
+        rows,
+        value_attr="grid_kwh_total",
+        state_start=5524.0,
+        sum_start=4983.0,
+    ) == [
+        {
+            "start": dt.datetime(2026, 6, 25, 23, 0, tzinfo=dt.UTC),
+            "state": 5526.0,
+            "sum": 4984.0,
+        },
+    ]
+
+
+def test_elapsed_statistic_hours_falls_back_without_datetimes() -> None:
+    assert statistics._elapsed_statistic_hours(None, dt.datetime(2026, 6, 25, tzinfo=dt.UTC)) == 1.0
+    assert statistics._elapsed_statistic_hours(dt.datetime(2026, 6, 25, tzinfo=dt.UTC), None) == 1.0
+    assert statistics._elapsed_statistic_hours(
+        dt.datetime(2026, 6, 25, 21, 0, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 25, 23, 0, tzinfo=dt.UTC),
+    ) == 2.0
+
+
+def test_statistic_bucket_is_none_for_incomplete_readings() -> None:
+    without_value = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 6, 24, 20, 15, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=None,
+        grid_kwh_total=None,
+    )
+
+    assert statistics._statistic_bucket(
+        without_value,
+        "grid_kwh_total",
+        align_to_hour=True,
+    ) is None
+
+
+def test_readings_after_existing_start_skips_gaps_and_matching_state() -> None:
+    readings = [
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4812.0,
+            grid_kwh_total=4812.0,
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 24, 23, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=None,
+            grid_kwh_total=None,
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="meter_1",
+            meter_name="Main meter",
+            timestamp=dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=4813.5,
+            grid_kwh_total=4813.5,
+        ),
+    ]
+
+    kept = statistics._readings_after_existing_start(
+        readings,
+        "grid_kwh_total",
+        existing_start=dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+        existing_state=4812.0,
+        align_to_hour=True,
+    )
+
+    assert [reading.timestamp for reading in kept] == [
+        dt.datetime(2026, 6, 25, 5, 0, tzinfo=dt.UTC),
+    ]
+    assert kept[0].grid_kwh_total == 4813.5
+
+
+def test_statistic_start_from_rows_without_usable_rows() -> None:
+    assert statistics._statistic_start_from_rows([]) == {}
+    assert statistics._statistic_start_from_rows(
+        [{"start": dt.datetime(2026, 6, 24, 17, 0, tzinfo=dt.UTC), "state": None, "sum": None}]
+    ) == {}
+
+
+def _interval_baseline_with_states(monkeypatch, states: dict) -> object:
+    async def statistic_starts(_hass, _statistic_ids, _start, *, require_sum=False):
+        return states
+
+    monkeypatch.setattr(statistics, "_async_statistic_starts", statistic_starts)
+    monkeypatch.setattr(statistics, "_meter_id_from_entity_registry", lambda _hass: "meter_1")
+    coordinator = types.SimpleNamespace(
+        data={},
+        config_entry=types.SimpleNamespace(options={}),
+    )
+    return asyncio.run(
+        statistics._async_interval_start_baseline(
+            object(),
+            coordinator,
+            dt.datetime(2026, 6, 20, 18, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 6, 25, 16, 0, tzinfo=dt.UTC),
+        )
+    )
+
+
+def test_interval_start_baseline_derives_total_from_grid_and_solar(monkeypatch) -> None:
+    baseline = _interval_baseline_with_states(
+        monkeypatch,
+        {
+            "sensor.astra_grid_energy": {
+                "state": 4772.637,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+            "sensor.astra_solar_energy": {
+                "state": 762.957,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+        },
+    )
+
+    assert baseline is not None
+    assert baseline.total_kwh == pytest.approx(5535.594)
+    assert baseline.grid_kwh_total == 4772.637
+
+
+def test_interval_start_baseline_derives_grid_from_total_and_solar(monkeypatch) -> None:
+    baseline = _interval_baseline_with_states(
+        monkeypatch,
+        {
+            "sensor.astra_solar_energy": {
+                "state": 762.957,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+            "sensor.astra_total_energy": {
+                "state": 5535.594,
+                "start": dt.datetime(2026, 6, 20, 23, 0, tzinfo=dt.UTC),
+            },
+        },
+    )
+
+    assert baseline is not None
+    assert baseline.grid_kwh_total == pytest.approx(4772.637)
+    assert baseline.total_kwh == 5535.594
+
+
+def test_interval_start_baseline_is_none_without_recorder_states(monkeypatch) -> None:
+    assert _interval_baseline_with_states(monkeypatch, {}) is None
