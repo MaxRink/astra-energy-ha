@@ -28,7 +28,7 @@ jobs:
           python -m pip install pytest pytest-cov 'ruff>=0.15.20,<0.16' pyyaml
 
       - name: Hassfest validation
-        uses: homeassistant/actions/hassfest@v1
+        uses: home-assistant/actions/hassfest@master
 
       - name: HACS validation
         uses: hacs/action@main
