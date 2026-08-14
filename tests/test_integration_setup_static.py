@@ -35,7 +35,7 @@ def test_import_statistics_registers_scheduled_backfill() -> None:
     assert "CONF_IMPORT_STATISTICS" in source
     assert "_async_run_configured_backfill" in source
     assert "max(entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL), 3600)" in source
-    assert "await initial_refresh_task" in source
+    assert "await coordinator.async_config_entry_first_refresh()" in source
     assert "_cancel_initial_backfill" in source
 
 
