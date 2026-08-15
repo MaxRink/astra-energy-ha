@@ -134,7 +134,7 @@ class AstraBrowserSession:
                 timezone="Europe/Berlin",
                 args=[
                     "--remote-debugging-port=9222",
-                    "--remote-debugging-address=0.0.0.0",
+                    "--remote-debugging-address=127.0.0.1",
                     "--disable-http2",
                 ],
             )

@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "43104:43104"
-      - "9222:9222"
     volumes:
       - astra-browser-profile:/profile
     environment:
