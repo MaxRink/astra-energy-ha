@@ -116,6 +116,18 @@ async def _async_validate_input(hass, user_input: dict[str, Any]) -> None:
         raise CannotConnect from err
 
 
+
+def _user_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+    """Return the schema for initial setup."""
+    defaults = defaults or {}
+    return vol.Schema(
+        {
+            vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
+            vol.Required(CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")): str,
+            vol.Required(CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)): str,
+        }
+    )
+
 def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the shared config/reconfigure schema."""
     defaults = defaults or {}
@@ -386,20 +398,20 @@ def _options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
 def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     """Return config entry options controlled by the UI."""
     return {
-        CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
-        CONF_BACKFILL_DAYS: int(user_input[CONF_BACKFILL_DAYS]),
-        CONF_RECENT_REFRESH_HOURS: int(user_input[CONF_RECENT_REFRESH_HOURS]),
-        CONF_HISTORY_GRANULARITY: user_input[CONF_HISTORY_GRANULARITY],
-        CONF_IMPORT_STATISTICS: user_input[CONF_IMPORT_STATISTICS],
-        CONF_GRID_PRICE_NET: float(user_input[CONF_GRID_PRICE_NET]),
-        CONF_SOLAR_PRICE_NET: float(user_input[CONF_SOLAR_PRICE_NET]),
-        CONF_TAX_RATE: float(user_input[CONF_TAX_RATE]),
-        CONF_MAX_INTERVAL_AVERAGE_KW: float(user_input[CONF_MAX_INTERVAL_AVERAGE_KW]),
-        CONF_SMOOTH_INTERVAL_ANOMALIES: user_input[CONF_SMOOTH_INTERVAL_ANOMALIES],
-        CONF_ANOMALY_REDISTRIBUTION_WINDOW: int(user_input[CONF_ANOMALY_REDISTRIBUTION_WINDOW]),
-        CONF_SMOOTHING_LOOKAROUND_DAYS: int(user_input[CONF_SMOOTHING_LOOKAROUND_DAYS]),
-        CONF_CACHE_INTERVAL_PAYLOADS: user_input[CONF_CACHE_INTERVAL_PAYLOADS],
-        CONF_WEB_FALLBACK_ENABLED: user_input[CONF_WEB_FALLBACK_ENABLED],
+        CONF_POLL_INTERVAL: int(user_input.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)),
+        CONF_BACKFILL_DAYS: int(user_input.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS)),
+        CONF_RECENT_REFRESH_HOURS: int(user_input.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS)),
+        CONF_HISTORY_GRANULARITY: user_input.get(CONF_HISTORY_GRANULARITY, DEFAULT_HISTORY_GRANULARITY),
+        CONF_IMPORT_STATISTICS: user_input.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
+        CONF_GRID_PRICE_NET: float(user_input.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET)),
+        CONF_SOLAR_PRICE_NET: float(user_input.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET)),
+        CONF_TAX_RATE: float(user_input.get(CONF_TAX_RATE, DEFAULT_TAX_RATE)),
+        CONF_MAX_INTERVAL_AVERAGE_KW: float(user_input.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW)),
+        CONF_SMOOTH_INTERVAL_ANOMALIES: user_input.get(CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES),
+        CONF_ANOMALY_REDISTRIBUTION_WINDOW: int(user_input.get(CONF_ANOMALY_REDISTRIBUTION_WINDOW, DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW)),
+        CONF_SMOOTHING_LOOKAROUND_DAYS: int(user_input.get(CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS)),
+        CONF_CACHE_INTERVAL_PAYLOADS: user_input.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
+        CONF_WEB_FALLBACK_ENABLED: user_input.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
         CONF_WEB_BASE_URL: str(
             user_input.get(CONF_WEB_BASE_URL) or DEFAULT_WEB_BASE_URL
         ).rstrip("/"),
@@ -408,7 +420,7 @@ def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_WEB_GRAPH_TOTAL_ID: str(
             user_input.get(CONF_WEB_GRAPH_TOTAL_ID) or DEFAULT_WEB_GRAPH_TOTAL_ID
         ).strip(),
-        CONF_BROWSER_PROXY_ENABLED: user_input[CONF_BROWSER_PROXY_ENABLED],
+        CONF_BROWSER_PROXY_ENABLED: user_input.get(CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED),
         CONF_BROWSER_PROXY_URL: str(
             user_input.get(CONF_BROWSER_PROXY_URL) or DEFAULT_BROWSER_PROXY_URL
         ).rstrip("/"),
@@ -454,7 +466,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=_data_schema(),
+            data_schema=_user_schema(),
             errors=errors,
         )
 
