@@ -77,6 +77,7 @@ class StubSensorEntityDescription:
     entity_category: str | None = None
     entity_registry_enabled_default: bool = True
     suggested_display_precision: int | None = None
+    icon: str | None = None
 
 
 class StubSensorEntity:
