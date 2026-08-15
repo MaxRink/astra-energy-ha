@@ -23,7 +23,17 @@ jobs:
       - name: Install test tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-cov ruff pyyaml
+          # Pin ruff. Version 0.16 widens the default rule set (isort, RUF, DTZ).
+          # The existing code is clean under 0.15.20.
+          python -m pip install pytest pytest-cov 'ruff>=0.15.20,<0.16' pyyaml
+
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
 
       - name: Lint
         run: ruff check .
