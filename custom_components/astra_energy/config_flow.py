@@ -483,7 +483,14 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
             else:
+                await self.async_set_unique_id(user_input[CONF_USERNAME].strip().lower())
+                self._abort_if_unique_id_configured()
+                self.hass.config_entries.async_update_entry(
+                    entry, title=f"Astra Energy ({user_input[CONF_USERNAME]})"
+                )
                 return self.async_update_reload_and_abort(entry, data_updates=merged)
 
         return self.async_show_form(
@@ -518,7 +525,14 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
             else:
+                await self.async_set_unique_id(user_input[CONF_USERNAME].strip().lower())
+                self._abort_if_unique_id_configured()
+                self.hass.config_entries.async_update_entry(
+                    entry, title=f"Astra Energy ({user_input[CONF_USERNAME]})"
+                )
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates=merged,
