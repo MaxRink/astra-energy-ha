@@ -33,7 +33,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class ProxyConfig:
-    bind: str = os.getenv("ASTRA_BIND", "0.0.0.0")
+    bind: str = os.getenv("ASTRA_BIND", "127.0.0.1")
     port: int = int(os.getenv("ASTRA_PORT", "43104"))
     profile_dir: str = os.getenv("ASTRA_PROFILE_DIR", "/profile")
     headless: bool = _env_bool("ASTRA_HEADLESS", False)
@@ -329,6 +329,8 @@ def _redact_url(value: str) -> str:
 
 
 CONFIG = ProxyConfig()
+if CONFIG.bind != "127.0.0.1" and not CONFIG.shared_token:
+    raise ValueError("ASTRA_SHARED_TOKEN is required when binding to non-loopback addresses")
 SESSION = AstraBrowserSession(CONFIG)
 
 
@@ -368,7 +370,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _authorized(self) -> bool:
         if not CONFIG.shared_token:
-            return True
+            if CONFIG.bind == "127.0.0.1":
+                return True
+            return False
         return self.headers.get("Authorization") == f"Bearer {CONFIG.shared_token}"
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
