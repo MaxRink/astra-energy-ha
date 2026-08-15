@@ -33,7 +33,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class ProxyConfig:
-    bind: str = os.getenv("ASTRA_BIND", "0.0.0.0")
+    bind: str = os.getenv("ASTRA_BIND", "127.0.0.1")
     port: int = int(os.getenv("ASTRA_PORT", "43104"))
     profile_dir: str = os.getenv("ASTRA_PROFILE_DIR", "/profile")
     headless: bool = _env_bool("ASTRA_HEADLESS", False)
@@ -384,6 +384,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if CONFIG.bind != "127.0.0.1" and not CONFIG.shared_token:
+        raise RuntimeError("Refusing to start unauthenticated proxy on non-loopback address. Set ASTRA_SHARED_TOKEN or bind to 127.0.0.1.")
     server = ThreadingHTTPServer((CONFIG.bind, CONFIG.port), Handler)
     LOGGER.info("Starting Astra browser proxy on %s:%s", CONFIG.bind, CONFIG.port)
     server.serve_forever()
