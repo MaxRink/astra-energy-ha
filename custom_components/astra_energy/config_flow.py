@@ -116,271 +116,151 @@ async def _async_validate_input(hass, user_input: dict[str, Any]) -> None:
         raise CannotConnect from err
 
 
+
+def _shared_schema_dict(defaults: dict[str, Any]) -> dict[vol.Marker, Any]:
+    return {
+        vol.Required(
+            CONF_POLL_INTERVAL,
+            default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+        ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
+        vol.Required(
+            CONF_BACKFILL_DAYS,
+            default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+        ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
+        vol.Required(
+            CONF_RECENT_REFRESH_HOURS,
+            default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
+        ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
+        vol.Required(
+            CONF_HISTORY_GRANULARITY,
+            default=defaults.get(
+                CONF_HISTORY_GRANULARITY,
+                DEFAULT_HISTORY_GRANULARITY,
+            ),
+        ): vol.In(HISTORY_GRANULARITIES),
+        vol.Required(
+            CONF_IMPORT_STATISTICS,
+            default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
+        ): bool,
+        vol.Required(
+            CONF_GRID_PRICE_NET,
+            default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
+        ): _number_box(
+            min_value=MIN_PRICE_NET,
+            max_value=MAX_PRICE_NET,
+            step=0.00001,
+            unit="EUR/kWh",
+        ),
+        vol.Required(
+            CONF_SOLAR_PRICE_NET,
+            default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
+        ): _number_box(
+            min_value=MIN_PRICE_NET,
+            max_value=MAX_PRICE_NET,
+            step=0.00001,
+            unit="EUR/kWh",
+        ),
+        vol.Required(
+            CONF_TAX_RATE,
+            default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
+        ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
+        vol.Required(
+            CONF_MAX_INTERVAL_AVERAGE_KW,
+            default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
+        ): _number_box(
+            min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
+            max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
+            step=0.1,
+            unit="kW",
+        ),
+        vol.Required(
+            CONF_SMOOTH_INTERVAL_ANOMALIES,
+            default=defaults.get(
+                CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+            ),
+        ): bool,
+        vol.Required(
+            CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+            default=defaults.get(
+                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+            ),
+        ): _number_box(
+            min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+            max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+            step=1,
+            unit="buckets",
+        ),
+        vol.Required(
+            CONF_SMOOTHING_LOOKAROUND_DAYS,
+            default=defaults.get(
+                CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+            ),
+        ): _number_box(
+            min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
+            max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
+            step=1,
+            unit="d",
+        ),
+        vol.Required(
+            CONF_CACHE_INTERVAL_PAYLOADS,
+            default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
+        ): bool,
+        vol.Required(
+            CONF_WEB_FALLBACK_ENABLED,
+            default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
+        ): bool,
+        vol.Optional(
+            CONF_WEB_BASE_URL,
+            default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
+        ): str,
+        vol.Optional(
+            CONF_WEB_SESSION_ID,
+            default=defaults.get(CONF_WEB_SESSION_ID, ""),
+        ): str,
+        vol.Optional(
+            CONF_WEB_COOKIE,
+            default=defaults.get(CONF_WEB_COOKIE, ""),
+        ): str,
+        vol.Optional(
+            CONF_WEB_GRAPH_TOTAL_ID,
+            default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
+        ): str,
+        vol.Required(
+            CONF_BROWSER_PROXY_ENABLED,
+            default=defaults.get(
+                CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
+            ),
+        ): bool,
+        vol.Optional(
+            CONF_BROWSER_PROXY_URL,
+            default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
+        ): str,
+        vol.Optional(
+            CONF_BROWSER_PROXY_TOKEN,
+            default=defaults.get(
+                CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
+            ),
+        ): str,
+    }
+
+
 def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the shared config/reconfigure schema."""
     defaults = defaults or {}
-    return vol.Schema(
-        {
-            vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
-            vol.Required(CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")): str,
-            vol.Required(CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)): str,
-            vol.Required(
-                CONF_POLL_INTERVAL,
-                default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
-            vol.Required(
-                CONF_BACKFILL_DAYS,
-                default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
-            ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
-            vol.Required(
-                CONF_RECENT_REFRESH_HOURS,
-                default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-            ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
-            vol.Required(
-                CONF_HISTORY_GRANULARITY,
-                default=defaults.get(
-                    CONF_HISTORY_GRANULARITY,
-                    DEFAULT_HISTORY_GRANULARITY,
-                ),
-            ): vol.In(HISTORY_GRANULARITIES),
-            vol.Required(
-                CONF_IMPORT_STATISTICS,
-                default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
-            ): bool,
-            vol.Required(
-                CONF_GRID_PRICE_NET,
-                default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_SOLAR_PRICE_NET,
-                default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_TAX_RATE,
-                default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-            ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
-            vol.Required(
-                CONF_MAX_INTERVAL_AVERAGE_KW,
-                default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
-            ): _number_box(
-                min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
-                max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
-                step=0.1,
-                unit="kW",
-            ),
-            vol.Required(
-                CONF_SMOOTH_INTERVAL_ANOMALIES,
-                default=defaults.get(
-                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
-                ),
-            ): bool,
-            vol.Required(
-                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                default=defaults.get(
-                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
-                ),
-            ): _number_box(
-                min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-                max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
-                step=1,
-                unit="buckets",
-            ),
-            vol.Required(
-                CONF_SMOOTHING_LOOKAROUND_DAYS,
-                default=defaults.get(
-                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
-                ),
-            ): _number_box(
-                min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
-                max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
-                step=1,
-                unit="d",
-            ),
-            vol.Required(
-                CONF_CACHE_INTERVAL_PAYLOADS,
-                default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
-            ): bool,
-            vol.Required(
-                CONF_WEB_FALLBACK_ENABLED,
-                default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
-            ): bool,
-            vol.Optional(
-                CONF_WEB_BASE_URL,
-                default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
-            ): str,
-            vol.Optional(
-                CONF_WEB_SESSION_ID,
-                default=defaults.get(CONF_WEB_SESSION_ID, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_COOKIE,
-                default=defaults.get(CONF_WEB_COOKIE, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_GRAPH_TOTAL_ID,
-                default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
-            ): str,
-            vol.Required(
-                CONF_BROWSER_PROXY_ENABLED,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
-                ),
-            ): bool,
-            vol.Optional(
-                CONF_BROWSER_PROXY_URL,
-                default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
-            ): str,
-            vol.Optional(
-                CONF_BROWSER_PROXY_TOKEN,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
-                ),
-            ): str,
-        }
-    )
+    schema = {
+        vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
+        vol.Required(CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")): str,
+        vol.Required(CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)): str,
+    }
+    schema.update(_shared_schema_dict(defaults))
+    return vol.Schema(schema)
 
 
 def _options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the options-only schema."""
     defaults = defaults or {}
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_POLL_INTERVAL,
-                default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
-            vol.Required(
-                CONF_BACKFILL_DAYS,
-                default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
-            ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
-            vol.Required(
-                CONF_RECENT_REFRESH_HOURS,
-                default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-            ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
-            vol.Required(
-                CONF_HISTORY_GRANULARITY,
-                default=defaults.get(
-                    CONF_HISTORY_GRANULARITY,
-                    DEFAULT_HISTORY_GRANULARITY,
-                ),
-            ): vol.In(HISTORY_GRANULARITIES),
-            vol.Required(
-                CONF_IMPORT_STATISTICS,
-                default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
-            ): bool,
-            vol.Required(
-                CONF_GRID_PRICE_NET,
-                default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_SOLAR_PRICE_NET,
-                default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_TAX_RATE,
-                default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-            ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
-            vol.Required(
-                CONF_MAX_INTERVAL_AVERAGE_KW,
-                default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
-            ): _number_box(
-                min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
-                max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
-                step=0.1,
-                unit="kW",
-            ),
-            vol.Required(
-                CONF_SMOOTH_INTERVAL_ANOMALIES,
-                default=defaults.get(
-                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
-                ),
-            ): bool,
-            vol.Required(
-                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                default=defaults.get(
-                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
-                ),
-            ): _number_box(
-                min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-                max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
-                step=1,
-                unit="buckets",
-            ),
-            vol.Required(
-                CONF_SMOOTHING_LOOKAROUND_DAYS,
-                default=defaults.get(
-                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
-                ),
-            ): _number_box(
-                min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
-                max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
-                step=1,
-                unit="d",
-            ),
-            vol.Required(
-                CONF_CACHE_INTERVAL_PAYLOADS,
-                default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
-            ): bool,
-            vol.Required(
-                CONF_WEB_FALLBACK_ENABLED,
-                default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
-            ): bool,
-            vol.Optional(
-                CONF_WEB_BASE_URL,
-                default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
-            ): str,
-            vol.Optional(
-                CONF_WEB_SESSION_ID,
-                default=defaults.get(CONF_WEB_SESSION_ID, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_COOKIE,
-                default=defaults.get(CONF_WEB_COOKIE, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_GRAPH_TOTAL_ID,
-                default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
-            ): str,
-            vol.Required(
-                CONF_BROWSER_PROXY_ENABLED,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
-                ),
-            ): bool,
-            vol.Optional(
-                CONF_BROWSER_PROXY_URL,
-                default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
-            ): str,
-            vol.Optional(
-                CONF_BROWSER_PROXY_TOKEN,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
-                ),
-            ): str,
-        }
-    )
+    return vol.Schema(_shared_schema_dict(defaults))
 
 
 def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
