@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryAuthFailed
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
-import voluptuous as vol
 
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
@@ -153,7 +153,7 @@ async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator)
     except ConfigEntryAuthFailed as err:
         coordinator.config_entry.async_start_reauth(coordinator.hass)
         _LOGGER.warning("Astra Energy initial refresh requires reauthentication: %s", err)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("Astra Energy initial refresh failed")
 
 
@@ -181,7 +181,7 @@ async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> 
             ),
             import_statistics=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("Astra Energy scheduled backfill failed")
     finally:
         coordinator._scheduled_backfill_running = False

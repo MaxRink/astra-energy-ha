@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, time, timedelta
-from hashlib import md5
 import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, time, timedelta
+from hashlib import md5
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -17,8 +17,8 @@ from .const import (
     DAILY_INTERVAL_CONCURRENCY,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_GRID_PRICE_NET,
-    DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
@@ -152,9 +152,9 @@ def _response_shape(text: str) -> str:
     """Return a safe, compact response shape for protocol errors."""
     stripped = text.lstrip()
     lower = stripped[:256].casefold()
-    if lower.startswith("<!doctype html") or lower.startswith("<html") or "<html" in lower:
+    if lower.startswith(("<!doctype html", "<html")) or "<html" in lower:
         return "HTML"
-    if lower.startswith("{") or lower.startswith("["):
+    if lower.startswith(("{", "[")):
         return "JSON"
     return "plain text"
 
@@ -871,9 +871,7 @@ def _redistribution_weights(
             return [weight / total for weight in profile_weights]
     weights = []
     for index in indexes:
-        if index == exclude_weight_index:
-            weight = 0.0
-        elif index in ignore_weight_indexes:
+        if index == exclude_weight_index or index in ignore_weight_indexes:
             weight = 0.0
         else:
             weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
@@ -1289,7 +1287,7 @@ class AstraClient:
         self._authenticated = False
         self._sid = _session_id(username, password)
         self._location_id = "-1"
-        self._year = str(datetime.now().year)
+        self._year = str(datetime.now(ASTRA_TIME_ZONE).year)
         self._month = "-1"
         self._date = "-1"
         self._medium = "1"
@@ -1355,7 +1353,7 @@ class AstraClient:
                     raise AstraHttpError(f"Astra HTTP {response.status}")
         except AstraApiError:
             raise
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             raise AstraNetworkError(
                 f"Astra request failed: {type(err).__name__}: {_sanitize_error_text(err)}"
             ) from err
@@ -1616,7 +1614,10 @@ class AstraClient:
                 ] = reading
         return sorted(
             readings_by_key.values(),
-            key=lambda reading: (reading.timestamp or datetime.min, reading.meter_id),
+            key=lambda reading: (
+                reading.timestamp or datetime.min.replace(tzinfo=UTC),
+                reading.meter_id,
+            ),
         )
 
     async def async_get_historical_interval_meter_stands(  # pragma: no cover

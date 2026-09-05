@@ -1,18 +1,18 @@
-from pathlib import Path
-import json
+import asyncio
 import datetime as dt
 import importlib.util
+import json
 import logging
 import sys
 import types
-import asyncio
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from tools.astra_mobile_probe import checksum, session_id
 from tools.analyze_capture import endpoint_key, redact_headers
+from tools.astra_mobile_probe import checksum, session_id
 
 api_path = Path(__file__).parents[1] / "custom_components" / "astra_energy" / "api.py"
 component_dir = api_path.parent
@@ -105,7 +105,7 @@ homeassistant_aiohttp_mod.async_get_clientsession = lambda _hass: None
 homeassistant_update_coordinator_mod.DataUpdateCoordinator = StubDataUpdateCoordinator
 homeassistant_update_coordinator_mod.CoordinatorEntity = StubCoordinatorEntity
 homeassistant_update_coordinator_mod.UpdateFailed = RuntimeError
-homeassistant_dt_mod.utcnow = lambda: dt.datetime(2026, 6, 20, 12, 0, 0)
+homeassistant_dt_mod.utcnow = lambda: dt.datetime(2026, 6, 20, 12, 0, 0, tzinfo=dt.UTC)
 homeassistant_dt_mod.as_utc = lambda value: value.astimezone(dt.UTC)
 homeassistant_util_mod.dt = homeassistant_dt_mod
 homeassistant_unit_conversion_mod.EnergyConverter = types.SimpleNamespace(UNIT_CLASS="energy")
@@ -224,6 +224,32 @@ def test_small_parsing_helpers_cover_missing_values() -> None:
     assert astra_api._normalize_identifier("TEST Solar/0") == "TEST_Solar_0"
     assert astra_api._raw_meter_id_from_row({"v01": "TEST_SOLAR_0"}) == "TEST_SOLAR_0"
     assert astra_api._raw_meter_id_from_row({"v01": "Strom VGB"}) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (True, True),
+        (False, False),
+        (1, True),
+        (0, False),
+        (2, None),
+        ("true", True),
+        ("success", True),
+        ("false", False),
+        ("failed", False),
+        ("unknown", None),
+    ],
+)
+def test_auth_status_and_rejection_helpers_cover_explicit_states(
+    value, expected
+) -> None:
+    assert astra_api._auth_status(value) is expected
+
+    if expected is True:
+        assert astra_api._is_auth_rejection({"auth": value}) is False
+    elif expected is False:
+        assert astra_api._is_auth_rejection({"auth": value}) is True
 
 
 def test_parse_meter_stands_from_payload() -> None:
@@ -3400,7 +3426,7 @@ def test_statistics_rows_skip_missing_timestamp_or_value_mixed_input() -> None:
             astra_api.AstraMeterReading(
                 meter_id="meter_1",
                 meter_name="Main meter",
-                timestamp=dt.datetime(2026, 6, 19, 1, 0),
+                timestamp=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.UTC),
                 power_w=None,
                 imported_kwh_total=None,
                 grid_kwh_total=100.0,
@@ -3408,7 +3434,7 @@ def test_statistics_rows_skip_missing_timestamp_or_value_mixed_input() -> None:
             astra_api.AstraMeterReading(
                 meter_id="meter_1",
                 meter_name="Main meter",
-                timestamp=dt.datetime(2026, 6, 19, 2, 0),
+                timestamp=dt.datetime(2026, 6, 19, 2, 0, tzinfo=dt.UTC),
                 power_w=None,
                 imported_kwh_total=None,
                 grid_kwh_total=None,
@@ -3838,8 +3864,10 @@ def test_recorder_baseline_logs_repeated_implausible_rows_once(caplog) -> None:
 
     messages = [record.getMessage() for record in caplog.records]
     assert messages == [
-        "Ignoring implausible Astra recorder baseline rows "
-        "statistic=sensor.astra_total_energy count=2"
+        (
+            "Ignoring implausible Astra recorder baseline rows "
+            "statistic=sensor.astra_total_energy count=2"
+        )
     ]
     assert all("previous=" not in message and "current=" not in message for message in messages)
 
@@ -3957,14 +3985,14 @@ def test_monotonic_reading_keeps_consistent_split_total_without_previous() -> No
 
 
 def test_statistics_channels_include_historical_derived_metrics() -> None:
-    for channel in {
+    for channel in (
         "raw_grid_energy",
         "grid_price",
         "solar_price",
         "tax_rate",
         "autarky",
         "pv_co2_savings",
-    }:
+    ):
         assert channel in statistics.STATISTIC_CHANNELS
 
 
@@ -3983,7 +4011,7 @@ def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
 
 def test_period_and_unsmoothed_entities_do_not_opt_into_recorder_statistics() -> None:
     descriptions = {description.key: description for description in astra_sensor.SENSOR_DESCRIPTIONS}
-    for key in {
+    for key in (
         "unsmoothed_imported_energy",
         "unsmoothed_solar_energy",
         "unsmoothed_total_energy",
@@ -4000,7 +4028,7 @@ def test_period_and_unsmoothed_entities_do_not_opt_into_recorder_statistics() ->
         "current_year_grid_cost",
         "current_year_solar_cost",
         "current_year_total_cost",
-    }:
+    ):
         assert descriptions[key].state_class is None
         assert key not in statistics.STATISTIC_CHANNELS
 

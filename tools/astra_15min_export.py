@@ -1,18 +1,18 @@
-#!/usr/bin/env python3
 """Export Astra Android 15-minute energy-balance payloads to CSV and SVG."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime, timedelta
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
-
+from zoneinfo import ZoneInfo
 
 SERIES_KEY = "_lvb_vll_14h"
 LABEL_KEY = "_lvb_lbl_14h"
 TITLE_KEY = "_lvb_ttl"
+ASTRA_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
 
 def main() -> int:
@@ -67,7 +67,7 @@ def _extract_points(path: Path, date_text: str) -> list[dict[str, float | str]]:
     series = {
         name: values for name, values in zip(names, _split_series(row[SERIES_KEY]), strict=False)
     }
-    start = datetime.strptime(date_text, "%Y-%m-%d")
+    start = datetime.strptime(date_text, "%Y-%m-%d").replace(tzinfo=ASTRA_TIME_ZONE)
     points: list[dict[str, float | str]] = []
     for index, label in enumerate(labels):
         timestamp = start + timedelta(minutes=15 * (index + 1))

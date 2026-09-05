@@ -458,7 +458,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         """Update redaction-safe browser proxy diagnostics."""
         self.browser_proxy_status = {
             "status": status,
-            "checked_at": datetime.now().isoformat(),
+            "checked_at": dt_util.utcnow().isoformat(),
             "message": message,
             "url": url,
             "reading_count": reading_count,

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Analyze ignored Astra raw API captures without Home Assistant."""
 
 from __future__ import annotations

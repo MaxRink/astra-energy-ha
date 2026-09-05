@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".secrets.env")

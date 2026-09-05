@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Probe Astra's Android JSON API without Home Assistant dependencies."""
 
 from __future__ import annotations

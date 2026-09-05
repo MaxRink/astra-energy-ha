@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from html import unescape
-import logging
-import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Capture Astra browser traffic through Chrome DevTools Protocol.
 
 This tool intentionally writes raw JSONL into `captures/`, which is gitignored.

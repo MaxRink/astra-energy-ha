@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Probe Astra browser login behavior without storing credentials in output."""
 
 from __future__ import annotations

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
@@ -57,17 +56,17 @@ from .const import (
     DEFAULT_WEB_GRAPH_TOTAL_ID,
     DOMAIN,
     HISTORY_GRANULARITIES,
+    MAX_ANOMALY_REDISTRIBUTION_WINDOW,
     MAX_BACKFILL_DAYS,
     MAX_MAX_INTERVAL_AVERAGE_KW,
-    MAX_ANOMALY_REDISTRIBUTION_WINDOW,
     MAX_PRICE_NET,
     MAX_RECENT_REFRESH_HOURS,
     MAX_SMOOTHING_LOOKAROUND_DAYS,
     MAX_TAX_RATE,
-    MIN_MAX_INTERVAL_AVERAGE_KW,
     MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-    MIN_PRICE_NET,
+    MIN_MAX_INTERVAL_AVERAGE_KW,
     MIN_POLL_INTERVAL,
+    MIN_PRICE_NET,
     MIN_SMOOTHING_LOOKAROUND_DAYS,
     MIN_TAX_RATE,
 )
