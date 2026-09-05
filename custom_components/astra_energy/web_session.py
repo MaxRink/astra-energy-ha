@@ -10,7 +10,7 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
-from .api import ASTRA_TIME_ZONE, AstraApiError, _parse_number
+from .api import ASTRA_TIME_ZONE, _parse_number, _sanitize_error_text
 from .const import DEFAULT_WEB_BASE_URL, DEFAULT_WEB_GRAPH_TOTAL_ID
 
 if TYPE_CHECKING:
@@ -44,17 +44,6 @@ class AstraWebSessionStatus:
     graph_id: str | None = None
     point_count: int | None = None
     response_bytes: int | None = None
-
-    def as_dict(self) -> dict[str, str | int | None]:
-        """Return attributes safe to expose as diagnostics."""
-        return {
-            "status": self.status,
-            "checked_at": self.checked_at,
-            "message": self.message,
-            "graph_id": self.graph_id,
-            "point_count": self.point_count,
-            "response_bytes": self.response_bytes,
-        }
 
 
 def parse_graph_points(html: str) -> list[AstraWebGraphPoint]:
@@ -172,6 +161,17 @@ async def async_check_web_session(
         ) as response:
             html = await response.text(encoding="latin-1", errors="ignore")
             if response.status >= 400:
+                if response.status in {401, 403}:
+                    return AstraWebSessionStatus(
+                        status="login_required",
+                        checked_at=checked_at,
+                        message=(
+                            "Astra rejected the stored browser session "
+                            f"(HTTP {response.status})"
+                        ),
+                        graph_id=graph_id,
+                        response_bytes=len(html.encode("latin-1", errors="ignore")),
+                    )
                 return AstraWebSessionStatus(
                     status="unreachable",
                     checked_at=checked_at,
@@ -184,7 +184,10 @@ async def async_check_web_session(
         return AstraWebSessionStatus(
             status="unreachable",
             checked_at=checked_at,
-            message=f"Astra web session check failed: {type(err).__name__}: {err}",
+            message=(
+                "Astra web session check failed: "
+                f"{type(err).__name__}: {_sanitize_error_text(err)}"
+            ),
             graph_id=graph_id,
         )
 
@@ -229,7 +232,3 @@ def _graph_url(
         "s_height": "400",
     }
     return f"{base}?{urlencode(params)}"
-
-
-class AstraWebSessionError(AstraApiError):
-    """Astra browser-session fallback is configured but not usable."""

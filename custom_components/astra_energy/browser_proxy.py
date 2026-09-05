@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from .api import ASTRA_TIME_ZONE, AstraApiError, AstraMeterReading, _round_or_none
+from .api import (
+    ASTRA_TIME_ZONE,
+    AstraApiError,
+    AstraMeterReading,
+    _round_or_none,
+    _sanitize_error_text,
+)
 from .const import (
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_REQUEST_TIMEOUT,
@@ -19,6 +25,10 @@ if TYPE_CHECKING:
 
 class AstraBrowserProxyError(AstraApiError):
     """The local Astra browser proxy failed or returned unusable data."""
+
+
+class AstraBrowserProxyAuthError(AstraBrowserProxyError):
+    """The local browser proxy rejected its configured access token."""
 
 
 async def async_fetch_browser_proxy_readings(
@@ -44,18 +54,23 @@ async def async_fetch_browser_proxy_readings(
             headers=headers,
             timeout=DEFAULT_REQUEST_TIMEOUT,
         ) as response:
-            payload = await response.json(content_type=None)
             if response.status >= 400:
-                message = payload.get("error") if isinstance(payload, dict) else None
-                raise AstraBrowserProxyError(
-                    f"Astra browser proxy returned HTTP {response.status}: "
-                    f"{message or 'unknown error'}"
+                error_type = (
+                    AstraBrowserProxyAuthError
+                    if response.status in {401, 403}
+                    else AstraBrowserProxyError
                 )
+                raise error_type(
+                    f"Astra browser proxy returned HTTP {response.status}: "
+                    "unknown error"
+                )
+            payload = await response.json(content_type=None)
     except AstraBrowserProxyError:
         raise
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         raise AstraBrowserProxyError(
-            f"Astra browser proxy request failed: {type(err).__name__}: {err}"
+            "Astra browser proxy request failed: "
+            f"{type(err).__name__}: {_sanitize_error_text(err)}"
         ) from err
 
     return parse_browser_proxy_payload(
@@ -77,9 +92,15 @@ def parse_browser_proxy_payload(
     if not isinstance(payload, dict):
         raise AstraBrowserProxyError("Astra browser proxy returned a non-object payload")
     if payload.get("ok") is not True:
-        raise AstraBrowserProxyError(
-            str(payload.get("error") or "Astra browser proxy returned an error")
+        message = _sanitize_error_text(
+            payload.get("error") or "Astra browser proxy returned an error"
         )
+        error_type = (
+            AstraBrowserProxyAuthError
+            if message.casefold() in {"unauthorized", "forbidden"}
+            else AstraBrowserProxyError
+        )
+        raise error_type(message)
     meter = payload.get("meter")
     if not isinstance(meter, dict):
         raise AstraBrowserProxyError("Astra browser proxy response is missing meter data")

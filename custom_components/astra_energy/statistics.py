@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-import logging
 from typing import Any
 
 from homeassistant.const import UnitOfEnergy
@@ -17,10 +17,8 @@ from homeassistant.util.unit_conversion import EnergyConverter
 from .api import AstraApiError, AstraAuthError, AstraDeferredDataError, AstraMeterReading
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-    CONF_GRID_PRICE_NET,
-    HISTORY_GRANULARITY_MONTHLY,
-    HISTORY_GRANULARITY_QUARTER_HOUR,
     CONF_CACHE_INTERVAL_PAYLOADS,
+    CONF_GRID_PRICE_NET,
     CONF_MAX_INTERVAL_AVERAGE_KW,
     CONF_SMOOTH_INTERVAL_ANOMALIES,
     CONF_SMOOTHING_LOOKAROUND_DAYS,
@@ -34,6 +32,8 @@ from .const import (
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
+    HISTORY_GRANULARITY_MONTHLY,
+    HISTORY_GRANULARITY_QUARTER_HOUR,
     ISSUE_BACKFILL_FAILED,
     SENSOR_DISPLAY_NAMES,
     SENSOR_OBJECT_IDS,
@@ -129,18 +129,6 @@ STATISTIC_CHANNELS = {
         "pv_co2_savings_t", None, "t", has_sum=False, has_mean=True
     ),
 }
-
-
-def _statistic_channels_for_granularity(
-    history_granularity: str,
-) -> dict[str, StatisticChannel]:
-    """Return channels that are valid for a backfill granularity."""
-    return STATISTIC_CHANNELS
-
-
-def _sensor_statistic_id(reading: AstraMeterReading, channel: str) -> str:
-    """Return the entity statistic id used by the energy sensor."""
-    return f"sensor.{SENSOR_OBJECT_IDS[channel]}"
 
 
 def _statistics_hour_start(timestamp: datetime) -> datetime:
@@ -298,14 +286,15 @@ def _elapsed_statistic_hours(
     return max((current_start - previous_start).total_seconds() / 3600, 0.25)
 
 
-def _statistics_state_rows(
+def _statistics_point_rows(
     readings: list[AstraMeterReading],
     value_attr: str,
     *,
+    row_key: str,
     align_to_hour: bool = False,
     value_multiplier: float = 1.0,
 ) -> list[dict]:
-    """Convert point-in-time readings to state-only recorder statistics rows."""
+    """Convert point-in-time readings to recorder statistics rows."""
     rows_by_start = {}
     for reading in sorted(
         readings,
@@ -317,37 +306,10 @@ def _statistics_state_rows(
         value *= value_multiplier
         timestamp = dt_util.as_utc(reading.timestamp)
         start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
-        rows_by_start[start] = {
-            "start": start,
-            "state": value,
-            "sum": None,
-        }
-    return list(rows_by_start.values())
-
-
-def _statistics_mean_rows(
-    readings: list[AstraMeterReading],
-    value_attr: str,
-    *,
-    align_to_hour: bool = False,
-    value_multiplier: float = 1.0,
-) -> list[dict]:
-    """Convert point-in-time readings to mean recorder statistics rows."""
-    rows_by_start = {}
-    for reading in sorted(
-        readings,
-        key=lambda item: (item.timestamp or dt_util.utcnow(), item.meter_id),
-    ):
-        value = getattr(reading, value_attr)
-        if reading.timestamp is None or value is None:
-            continue
-        value *= value_multiplier
-        timestamp = dt_util.as_utc(reading.timestamp)
-        start = _statistics_hour_start(timestamp) if align_to_hour else timestamp
-        rows_by_start[start] = {
-            "start": start,
-            "mean": value,
-        }
+        row = {"start": start, row_key: value}
+        if row_key == "state":
+            row["sum"] = None
+        rows_by_start[start] = row
     return list(rows_by_start.values())
 
 
@@ -365,36 +327,20 @@ def _statistic_data(StatisticData, row: dict):
     return StatisticData(**kwargs)
 
 
-def _statistic_import_start(
+def _statistic_import_bounds(
     readings: list[AstraMeterReading],
     value_attr: str,
     *,
     align_to_hour: bool = False,
-) -> datetime | None:
-    """Return the first recorder bucket that will be written for a channel."""
+) -> tuple[datetime | None, datetime | None]:
+    """Return the first and last recorder buckets for a channel."""
     starts = []
     for reading in readings:
         if reading.timestamp is None or getattr(reading, value_attr) is None:
             continue
         timestamp = dt_util.as_utc(reading.timestamp)
         starts.append(_statistics_hour_start(timestamp) if align_to_hour else timestamp)
-    return min(starts) if starts else None
-
-
-def _statistic_import_end(
-    readings: list[AstraMeterReading],
-    value_attr: str,
-    *,
-    align_to_hour: bool = False,
-) -> datetime | None:
-    """Return the last recorder bucket that will be written for a channel."""
-    starts = []
-    for reading in readings:
-        if reading.timestamp is None or getattr(reading, value_attr) is None:
-            continue
-        timestamp = dt_util.as_utc(reading.timestamp)
-        starts.append(_statistics_hour_start(timestamp) if align_to_hour else timestamp)
-    return max(starts) if starts else None
+    return (min(starts), max(starts)) if starts else (None, None)
 
 
 def _statistic_bucket(
@@ -801,7 +747,7 @@ async def async_backfill_statistics(  # pragma: no cover
         )
         raise HomeAssistantError("Recorder statistics API is not available") from err
 
-    statistic_channels = _statistic_channels_for_granularity(history_granularity)
+    statistic_channels = STATISTIC_CHANNELS
     statistic_starts: dict[tuple[str, datetime], dict[str, float]] = {}
     rewrite_start = (
         _statistics_hour_start(end - timedelta(hours=recent_refresh_hours))
@@ -810,11 +756,11 @@ async def async_backfill_statistics(  # pragma: no cover
         else None
     )
 
-    for meter_id, meter_readings in grouped.items():
+    for meter_readings in grouped.values():
         if not meter_readings:
             continue
         for channel, channel_def in statistic_channels.items():
-            statistic_id = _sensor_statistic_id(meter_readings[-1], channel)
+            statistic_id = f"sensor.{SENSOR_OBJECT_IDS[channel]}"
             metadata = StatisticMetaData(
                 has_sum=channel_def.has_sum,
                 mean_type=(
@@ -830,12 +776,7 @@ async def async_backfill_statistics(  # pragma: no cover
             )
             align_to_hour = history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR
             channel_readings = meter_readings
-            aligned_import_start = _statistic_import_start(
-                meter_readings,
-                channel_def.value_attr,
-                align_to_hour=align_to_hour,
-            )
-            aligned_import_end = _statistic_import_end(
+            aligned_import_start, aligned_import_end = _statistic_import_bounds(
                 meter_readings,
                 channel_def.value_attr,
                 align_to_hour=align_to_hour,
@@ -910,16 +851,18 @@ async def async_backfill_statistics(  # pragma: no cover
                     ),
                 )
                 if channel_def.has_sum
-                else _statistics_mean_rows(
+                else _statistics_point_rows(
                     channel_readings,
                     channel_def.value_attr,
+                    row_key="mean",
                     align_to_hour=align_to_hour,
                     value_multiplier=channel_def.value_multiplier,
                 )
                 if channel_def.has_mean
-                else _statistics_state_rows(
+                else _statistics_point_rows(
                     channel_readings,
                     channel_def.value_attr,
+                    row_key="state",
                     align_to_hour=align_to_hour,
                     value_multiplier=channel_def.value_multiplier,
                 )
@@ -951,7 +894,7 @@ async def async_backfill_statistics(  # pragma: no cover
                         async_import_statistics(hass, metadata, batch)
                         imported_rows += len(batch)
                         await asyncio.sleep(0)
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     await async_create_issue(
                         hass,
                         ISSUE_BACKFILL_FAILED,

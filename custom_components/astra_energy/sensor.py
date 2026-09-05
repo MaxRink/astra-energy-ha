@@ -35,28 +35,23 @@ class AstraSensorEntityDescription(SensorEntityDescription):
     value_attr: str
 
 
-@dataclass(frozen=True, kw_only=True)
-class AstraCoordinatorSensorEntityDescription(SensorEntityDescription):
-    """Coordinator-level Astra diagnostic sensor description."""
-
-
-COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, ...] = (
-    AstraCoordinatorSensorEntityDescription(
+COORDINATOR_SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
         key="api_status",
         translation_key="api_status",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    AstraCoordinatorSensorEntityDescription(
+    SensorEntityDescription(
         key="last_successful_source",
         translation_key="last_successful_source",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    AstraCoordinatorSensorEntityDescription(
+    SensorEntityDescription(
         key="web_session_status",
         translation_key="web_session_status",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    AstraCoordinatorSensorEntityDescription(
+    SensorEntityDescription(
         key="browser_proxy_status",
         translation_key="browser_proxy_status",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -432,13 +427,13 @@ def _is_safe_deferred_reading(reading: AstraMeterReading) -> bool:
 class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity):
     """Sensor backed by coordinator status rather than one meter field."""
 
-    entity_description: AstraCoordinatorSensorEntityDescription
+    entity_description: SensorEntityDescription
     _attr_has_entity_name = False
 
     def __init__(
         self,
         coordinator: AstraEnergyCoordinator,
-        description: AstraCoordinatorSensorEntityDescription,
+        description: SensorEntityDescription,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description

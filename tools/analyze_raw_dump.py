@@ -6,9 +6,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,9 +30,6 @@ spec.loader.exec_module(astra_api)
 
 AstraClient = astra_api.AstraClient
 _parse_number = astra_api._parse_number
-
-MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-
 
 def main() -> int:
     """Analyze raw dump files."""

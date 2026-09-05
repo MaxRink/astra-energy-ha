@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntryAuthFailed
@@ -16,10 +17,17 @@ from .api import (
     AstraAuthError,
     AstraClient,
     AstraDeferredDataError,
+    AstraHttpError,
     AstraMeterReading,
+    AstraNetworkError,
+    AstraProtocolError,
     _cost_gross,
     _round_or_none,
     monotonic_reading,
+)
+from .browser_proxy import (
+    AstraBrowserProxyAuthError,
+    async_fetch_browser_proxy_readings,
 )
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
@@ -57,7 +65,6 @@ from .const import (
     ISSUE_WEB_SESSION,
     SENSOR_OBJECT_IDS,
 )
-from .browser_proxy import async_fetch_browser_proxy_readings
 from .reporting import async_create_issue, async_delete_issue, error_payload
 from .web_session import async_check_web_session
 
@@ -74,6 +81,15 @@ _BASELINE_COST_STATISTIC_ATTRS = {
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 _MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
+
+
+def _api_status_for_error(err: AstraApiError) -> str:
+    """Return a stable diagnostic status for a non-authentication failure."""
+    if isinstance(err, (AstraNetworkError, AstraHttpError)):
+        return "unavailable"
+    if isinstance(err, AstraProtocolError):
+        return "protocol_error"
+    return "error"
 
 
 class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]):
@@ -200,7 +216,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 return self.data
             return await self._async_recorder_fallback_readings()
         except AstraApiError as err:
-            self.api_status = "error"
+            self.api_status = _api_status_for_error(err)
             self.last_error = error_payload(err)
             await self._async_update_web_session_status()
             await async_create_issue(
@@ -386,6 +402,10 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                     self.config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE)
                 ),
             )
+        except AstraBrowserProxyAuthError as err:
+            self._set_browser_proxy_status("unauthorized", message=str(err), url=url)
+            _LOGGER.warning("Astra browser proxy authorization failed: %s", err)
+            return None
         except AstraApiError as err:
             self._set_browser_proxy_status("error", message=str(err), url=url)
             _LOGGER.warning("Astra browser proxy fallback failed: %s", err)
@@ -469,7 +489,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID
             ),
         )
-        self.web_session_status = status.as_dict()
+        self.web_session_status = asdict(status)
         if status.status == "ok":
             await async_delete_issue(self.hass, ISSUE_WEB_SESSION)
             return

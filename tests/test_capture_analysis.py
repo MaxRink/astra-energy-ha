@@ -6,7 +6,7 @@ import logging
 import sys
 import types
 import asyncio
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1892,6 +1892,55 @@ def test_coordinator_deferred_update_keeps_deferred_when_browser_proxy_fails(
     assert calls[-1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
 
 
+def test_coordinator_does_not_turn_proxy_token_rejection_into_mobile_reauth(
+    monkeypatch,
+) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def proxy_readings(*_args, **_kwargs):
+        raise astra_coordinator.AstraBrowserProxyAuthError(
+            "Astra browser proxy unauthorized"
+        )
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def create_issue(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+            }
+        ),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    assert asyncio.run(coordinator._async_update_data()) == {}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.browser_proxy_status["status"] == "unauthorized"
+
+
 def test_coordinator_deferred_startup_uses_recorder_fallback(monkeypatch) -> None:
     class Client:
         async def async_get_meters(self):
@@ -2298,6 +2347,54 @@ def test_coordinator_non_deferred_update_keeps_repair_issue(monkeypatch) -> None
     assert coordinator.api_status == "error"
     assert [call[0] for call in calls] == ["create"]
     assert calls[0][1][1] == astra_coordinator.ISSUE_API_UNAVAILABLE
+
+
+def test_coordinator_only_requests_reauth_for_auth_errors(monkeypatch) -> None:
+    calls = []
+
+    async def create_issue(*args, **kwargs):
+        calls.append(("create", args, kwargs))
+
+    async def delete_issue(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+
+    class AuthClient:
+        async def async_get_meters(self):
+            raise astra_api.AstraInvalidCredentialsError(
+                "Invalid password=not-real-password"
+            )
+
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(options={}),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = AuthClient()
+
+    with pytest.raises(RuntimeError, match="Invalid"):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.api_status == "invalid_auth"
+    assert coordinator.last_error["message"] == "Invalid <redacted>"
+    assert calls[0][0] == "create"
+    assert calls[0][1][1] == astra_coordinator.ISSUE_API_AUTH
+
+    class NetworkClient:
+        async def async_get_meters(self):
+            raise astra_api.AstraNetworkError("network down")
+
+    coordinator.client = NetworkClient()
+    with pytest.raises(RuntimeError, match="network down"):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.api_status == "unavailable"
+    assert calls[-1][1][1] == astra_coordinator.ISSUE_API_UNAVAILABLE
 
 
 def test_interval_sanitizer_rejects_negative_values() -> None:
@@ -2844,7 +2941,7 @@ def test_statistics_rows_apply_sum_offset_without_changing_state() -> None:
     ]
 
 
-def test_statistic_import_start_uses_first_aligned_bucket() -> None:
+def test_statistic_import_bounds_use_aligned_buckets() -> None:
     readings = [
         astra_api.AstraMeterReading(
             meter_id="meter_1",
@@ -2864,16 +2961,14 @@ def test_statistic_import_start_uses_first_aligned_bucket() -> None:
         ),
     ]
 
-    assert statistics._statistic_import_start(
+    assert statistics._statistic_import_bounds(
         readings,
         "grid_kwh_total",
         align_to_hour=True,
-    ) == dt.datetime(2026, 6, 24, 19, 0, tzinfo=dt.UTC)
-    assert statistics._statistic_import_end(
-        readings,
-        "grid_kwh_total",
-        align_to_hour=True,
-    ) == dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC)
+    ) == (
+        dt.datetime(2026, 6, 24, 19, 0, tzinfo=dt.UTC),
+        dt.datetime(2026, 6, 24, 20, 0, tzinfo=dt.UTC),
+    )
 
 
 def test_statistic_start_for_sum_channel_skips_null_sum_rows() -> None:
@@ -3336,28 +3431,15 @@ def test_interval_hour_start_handles_exact_hour() -> None:
 
 
 def test_statistics_ids_match_suggested_entity_ids() -> None:
-    reading = astra_api.AstraMeterReading(
-        meter_id="TEST_TOTAL_0",
-        meter_name="TEST_TOTAL/0",
-        timestamp=None,
-        power_w=None,
-        imported_kwh_total=None,
-    )
-
-    assert statistics._sensor_statistic_id(reading, "imported_energy") == (
-        "sensor.astra_grid_energy"
-    )
-    assert statistics._sensor_statistic_id(reading, "solar_energy") == ("sensor.astra_solar_energy")
-    assert statistics._sensor_statistic_id(reading, "total_energy") == ("sensor.astra_total_energy")
-    assert statistics._sensor_statistic_id(reading, "current_month_total_cost") == (
-        "sensor.astra_current_month_total_cost"
-    )
-    assert statistics._sensor_statistic_id(reading, "current_year_total_energy") == (
-        "sensor.astra_current_year_total_energy"
-    )
-    assert statistics._sensor_statistic_id(reading, "grid_price") == (
-        "sensor.astra_grid_energy_price"
-    )
+    for channel, object_id in {
+        "imported_energy": "astra_grid_energy",
+        "solar_energy": "astra_solar_energy",
+        "total_energy": "astra_total_energy",
+        "current_month_total_cost": "astra_current_month_total_cost",
+        "current_year_total_energy": "astra_current_year_total_energy",
+        "grid_price": "astra_grid_energy_price",
+    }.items():
+        assert f"sensor.{statistics.SENSOR_OBJECT_IDS[channel]}" == f"sensor.{object_id}"
 
 
 def test_unsmoothed_diagnostic_sensors_are_not_imported_to_recorder_statistics() -> None:
@@ -3887,8 +3969,7 @@ def test_statistics_channels_include_historical_derived_metrics() -> None:
 
 
 def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
-    monthly_channels = statistics._statistic_channels_for_granularity("monthly")
-    channels = statistics._statistic_channels_for_granularity("quarter_hour")
+    channels = statistics.STATISTIC_CHANNELS
 
     assert "imported_energy" in channels
     assert "solar_energy" in channels
@@ -3898,8 +3979,6 @@ def test_quarter_hour_statistics_skip_partial_period_metrics() -> None:
     assert "current_month_total_cost" not in channels
     assert "current_year_total_energy" not in channels
     assert "current_year_total_cost" not in channels
-    assert "current_month_total_energy" not in monthly_channels
-    assert "current_year_total_energy" not in monthly_channels
 
 
 def test_period_and_unsmoothed_entities_do_not_opt_into_recorder_statistics() -> None:
@@ -3968,7 +4047,7 @@ def test_sum_statistics_rows_allow_period_resets() -> None:
 
 
 def test_state_and_mean_statistics_rows_shape_values() -> None:
-    rows = statistics._statistics_state_rows(
+    rows = statistics._statistics_point_rows(
         [
             astra_api.AstraMeterReading(
                 meter_id="meter_1",
@@ -3990,9 +4069,10 @@ def test_state_and_mean_statistics_rows_shape_values() -> None:
             ),
         ],
         "current_month_total_kwh",
+        row_key="state",
         align_to_hour=True,
     )
-    tax_rows = statistics._statistics_state_rows(
+    tax_rows = statistics._statistics_point_rows(
         [
             astra_api.AstraMeterReading(
                 meter_id="meter_1",
@@ -4004,9 +4084,10 @@ def test_state_and_mean_statistics_rows_shape_values() -> None:
             )
         ],
         "tax_rate",
+        row_key="state",
         value_multiplier=100.0,
     )
-    mean_rows = statistics._statistics_mean_rows(
+    mean_rows = statistics._statistics_point_rows(
         [
             astra_api.AstraMeterReading(
                 meter_id="meter_1",
@@ -4018,6 +4099,7 @@ def test_state_and_mean_statistics_rows_shape_values() -> None:
             )
         ],
         "tax_rate",
+        row_key="mean",
         value_multiplier=100.0,
     )
     missing_timestamp = astra_api.AstraMeterReading(
@@ -4044,10 +4126,18 @@ def test_state_and_mean_statistics_rows_shape_values() -> None:
     assert tax_rows[0]["state"] == 19.0
     assert mean_rows[0]["mean"] == 19.0
     assert "state" not in mean_rows[0]
-    assert statistics._statistics_state_rows([missing_timestamp], "current_month_total_kwh") == []
-    assert statistics._statistics_state_rows([missing_value], "current_month_total_kwh") == []
-    assert statistics._statistics_mean_rows([missing_timestamp], "tax_rate") == []
-    assert statistics._statistics_mean_rows([missing_value], "tax_rate") == []
+    assert (
+        statistics._statistics_point_rows(
+            [missing_timestamp], "current_month_total_kwh", row_key="state"
+        )
+        == []
+    )
+    assert (
+        statistics._statistics_point_rows([missing_value], "current_month_total_kwh", row_key="state")
+        == []
+    )
+    assert statistics._statistics_point_rows([missing_timestamp], "tax_rate", row_key="mean") == []
+    assert statistics._statistics_point_rows([missing_value], "tax_rate", row_key="mean") == []
 
 
 def test_statistics_helpers_shape_batches_and_sparse_rows() -> None:
@@ -4123,7 +4213,7 @@ def _verified_response(body: str, status: int = 200) -> FakeResponse:
     return FakeResponse(body + astra_api._md5(body), status=status)
 
 
-def test_post_raw_wraps_unreachable_api() -> None:
+def test_post_raw_at_url_wraps_unreachable_api() -> None:
     client = astra_api.AstraClient(
         FakeSession(error=OSError("network down")),
         username="user@example.test",
@@ -4132,10 +4222,10 @@ def test_post_raw_wraps_unreachable_api() -> None:
     )
 
     with pytest.raises(astra_api.AstraApiError, match="network down"):
-        asyncio.run(client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
 
-def test_post_raw_reports_http_errors() -> None:
+def test_post_raw_at_url_reports_http_errors() -> None:
     client = astra_api.AstraClient(
         FakeSession(response=_verified_response("nope", status=500)),
         username="user@example.test",
@@ -4144,10 +4234,10 @@ def test_post_raw_reports_http_errors() -> None:
     )
 
     with pytest.raises(astra_api.AstraApiError, match="Astra HTTP 500"):
-        asyncio.run(client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
 
-def test_post_raw_uses_bounded_request_timeout() -> None:
+def test_post_raw_at_url_uses_bounded_request_timeout() -> None:
     session = FakeSession(response=_verified_response("ok"))
     client = astra_api.AstraClient(
         session,
@@ -4156,11 +4246,11 @@ def test_post_raw_uses_bounded_request_timeout() -> None:
         base_url="https://example.test",
     )
 
-    assert asyncio.run(client._post_raw({"s_action": "get_ts"})) == "ok"
+    assert asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"})) == "ok"
     assert session.calls[0][1]["timeout"] == astra_api.DEFAULT_REQUEST_TIMEOUT
 
 
-def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
+def test_post_raw_at_url_rejects_short_and_bad_checksum_responses() -> None:
     short_client = astra_api.AstraClient(
         FakeSession(response=FakeResponse("short")),
         username="user@example.test",
@@ -4168,7 +4258,7 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         base_url="https://example.test",
     )
     with pytest.raises(astra_api.AstraProtocolError, match="too short"):
-        asyncio.run(short_client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(short_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
     html_client = astra_api.AstraClient(
         FakeSession(
@@ -4181,7 +4271,7 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         base_url="https://example.test",
     )
     with pytest.raises(astra_api.AstraProtocolError, match="HTML response"):
-        asyncio.run(html_client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(html_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
     json_client = astra_api.AstraClient(
         FakeSession(
@@ -4193,7 +4283,7 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         password="secret",
         base_url="https://example.test",
     )
-    assert asyncio.run(json_client._post_raw({"s_action": "get_ts"})) == (
+    assert asyncio.run(json_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"})) == (
         '{"auth": "1", "data": [], "message": "missing checksum suffix"}'
     )
 
@@ -4204,7 +4294,7 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         base_url="https://example.test",
     )
     with pytest.raises(astra_api.AstraProtocolError, match="plain text response"):
-        asyncio.run(text_client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(text_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
     checksum_client = astra_api.AstraClient(
         FakeSession(response=FakeResponse("body" + "0" * 32)),
@@ -4213,7 +4303,7 @@ def test_post_raw_rejects_short_and_bad_checksum_responses() -> None:
         base_url="https://example.test",
     )
     with pytest.raises(astra_api.AstraProtocolError, match="checksum"):
-        asyncio.run(checksum_client._post_raw({"s_action": "get_ts"}))
+        asyncio.run(checksum_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
 
 def test_post_action_falls_back_between_mobile_endpoints() -> None:
@@ -4239,6 +4329,36 @@ def test_post_action_falls_back_between_mobile_endpoints() -> None:
 
     assert json.loads(result) == {"auth": "1"}
     assert session.calls == [bad_url, good_url, good_url]
+
+
+def test_post_action_preserves_auth_rejection_over_later_endpoint_failure() -> None:
+    first_url = "https://auth.example.test/csandroid.php"
+    second_url = "https://network.example.test/csios.php"
+
+    class AuthThenNetworkSession:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def post(self, url, **_kwargs):
+            self.calls.append(url)
+            if url == first_url:
+                return _verified_response("unauthorized", status=401)
+            raise OSError("network down")
+
+    session = AuthThenNetworkSession()
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="not-real-password",
+        base_url=f"{first_url},{second_url}",
+    )
+    client._authenticated = True
+
+    with pytest.raises(astra_api.AstraSessionExpiredError):
+        asyncio.run(client._post_action("auth_login", s_sid="sid"))
+
+    assert session.calls == [first_url]
+    assert client._authenticated is False
 
 
 def test_login_reports_protocol_and_auth_errors() -> None:
@@ -4269,6 +4389,135 @@ def test_login_reports_protocol_and_auth_errors() -> None:
     auth_client._post_action = auth_failed
     with pytest.raises(astra_api.AstraAuthError, match="authentication failed"):
         asyncio.run(auth_client.async_login())
+
+
+def test_login_preserves_safe_provider_reason_without_credentials() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+
+    async def auth_failed(*_args, **_kwargs):
+        return json.dumps(
+            {
+                "auth": "0",
+                "message": "Invalid password=not-real-password for user@example.test",
+            }
+        )
+
+    client._post_action = auth_failed
+    with pytest.raises(astra_api.AstraInvalidCredentialsError) as raised:
+        asyncio.run(client.async_login())
+
+    assert "Invalid" in str(raised.value)
+    assert "not-real-password" not in str(raised.value)
+    assert "user@example.test" not in str(raised.value)
+
+
+def test_error_text_sanitizer_redacts_compound_credential_fields() -> None:
+    message = (
+        "access_token=access-value refresh_token=refresh-value "
+        'browser_proxy_token=proxy-value "access_token":"quoted-value" '
+        '"refresh_token": "quoted-refresh"'
+    )
+
+    sanitized = astra_api._sanitize_error_text(message)
+
+    assert "access-value" not in sanitized
+    assert "refresh-value" not in sanitized
+    assert "proxy-value" not in sanitized
+    assert "quoted-value" not in sanitized
+    assert "quoted-refresh" not in sanitized
+
+    assert "xy" not in astra_api._sanitize_error_text("provider said xy", ("xy",))
+    for authorization in (
+        "Authorization: Bearer abc123",
+        '"Authorization":"Bearer abc123"',
+        "'Authorization': 'Bearer abc123'",
+    ):
+        assert "abc123" not in astra_api._sanitize_error_text(authorization)
+
+
+def test_login_without_explicit_auth_status_is_protocol_error() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+
+    async def malformed(*_args, **_kwargs):
+        return json.dumps({"message": "temporary backend response"})
+
+    client._post_action = malformed
+    with pytest.raises(astra_api.AstraProtocolError, match="valid auth status"):
+        asyncio.run(client.async_login())
+
+
+def test_authenticated_endpoint_distinguishes_expired_session() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+
+    async def expired(*_args, **_kwargs):
+        return json.dumps({"auth": "0", "error": "session expired"})
+
+    client._post_action = expired
+    with pytest.raises(astra_api.AstraSessionExpiredError, match="session expired"):
+        asyncio.run(client._get_json("get_mtr_lzs"))
+    assert client._authenticated is False
+
+
+def test_mobile_request_classifies_network_http_and_auth_failures() -> None:
+    network_client = astra_api.AstraClient(
+        FakeSession(error=OSError("network down")),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraNetworkError):
+        asyncio.run(network_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+
+    http_client = astra_api.AstraClient(
+        FakeSession(response=_verified_response("server error", status=503)),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+    with pytest.raises(astra_api.AstraHttpError):
+        asyncio.run(http_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+
+    auth_client = astra_api.AstraClient(
+        FakeSession(response=_verified_response("unauthorized", status=401)),
+        username="user@example.test",
+        password="not-real-password",
+        base_url="https://example.test",
+    )
+    auth_client._authenticated = True
+    with pytest.raises(astra_api.AstraSessionExpiredError):
+        asyncio.run(auth_client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+    assert auth_client._authenticated is False
+
+
+def test_unauthenticated_http_auth_status_is_not_stored_credential_rejection() -> None:
+    for status in (401, 403):
+        client = astra_api.AstraClient(
+            FakeSession(response=_verified_response("unauthorized", status=status)),
+            username="user@example.test",
+            password="not-real-password",
+            base_url="https://example.test",
+        )
+
+        with pytest.raises(astra_api.AstraHttpError, match=f"Astra HTTP {status}"):
+            asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+
+        assert client._authenticated is False
 
 
 def test_reporting_error_payload() -> None:
@@ -4333,7 +4582,7 @@ def test_web_session_check_reports_missing_configuration() -> None:
     )
 
     assert status.status == "not_configured"
-    assert status.as_dict()["status"] == "not_configured"
+    assert asdict(status)["status"] == "not_configured"
 
 
 def test_web_session_check_reports_incomplete_configuration() -> None:
@@ -4403,6 +4652,34 @@ def test_web_session_check_reports_http_errors() -> None:
     assert status.status == "unreachable"
     assert status.message == "Astra web graph returned HTTP 503"
     assert status.response_bytes == len("server error")
+
+
+def test_web_session_check_classifies_rejected_stored_session() -> None:
+    status = asyncio.run(
+        web_session.async_check_web_session(
+            FakeGetSession(response=FakeResponse("unauthorized", status=401)),
+            session_id="session-id",
+            cookie="sid=not-real-cookie",
+            graph_id="test_graph",
+        )
+    )
+
+    assert status.status == "login_required"
+    assert "HTTP 401" in status.message
+    assert "not-real-cookie" not in status.message
+
+
+def test_browser_proxy_errors_redact_token_like_values() -> None:
+    with pytest.raises(browser_proxy.AstraBrowserProxyError) as raised:
+        browser_proxy.parse_browser_proxy_payload(
+            {"ok": False, "error": "token=not-real-token"}
+        )
+
+    assert "not-real-token" not in str(raised.value)
+    assert "<redacted>" in str(raised.value)
+
+    with pytest.raises(browser_proxy.AstraBrowserProxyAuthError):
+        browser_proxy.parse_browser_proxy_payload({"ok": False, "error": "unauthorized"})
 
 
 def test_web_session_check_reports_valid_cookie_session() -> None:

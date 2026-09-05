@@ -85,8 +85,6 @@ def _number_box(
     *,
     min_value: float | None = None,
     max_value: float | None = None,
-    step: float | None = None,
-    unit: str | None = None,
 ) -> vol.All:
     """Return a plain numeric validator for config flows."""
     validators: list[Any] = [vol.Coerce(float)]
@@ -102,285 +100,145 @@ def _number_box(
 
 async def _async_validate_input(hass, user_input: dict[str, Any]) -> None:
     """Validate Astra credentials by logging in through the Android API."""
+    username = str(user_input.get(CONF_USERNAME) or "").strip()
+    password = user_input.get(CONF_PASSWORD)
+    if not username or not isinstance(password, str) or not password:
+        raise InvalidAuth
     client = AstraClient(
         async_get_clientsession(hass),
-        username=user_input[CONF_USERNAME],
-        password=user_input[CONF_PASSWORD],
-        base_url=user_input[CONF_BASE_URL],
+        username=username,
+        password=password,
+        base_url=str(user_input.get(CONF_BASE_URL) or DEFAULT_BASE_URL).rstrip("/"),
     )
     try:
-        await client.async_get_account_info()
+        await client.async_login()
     except AstraAuthError as err:
         raise InvalidAuth from err
     except AstraApiError as err:
         raise CannotConnect from err
 
 
+def _options_schema_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """Return the shared option fields for config and options flows."""
+    return {
+        vol.Required(
+            CONF_POLL_INTERVAL,
+            default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+        ): _number_box(min_value=MIN_POLL_INTERVAL),
+        vol.Required(
+            CONF_BACKFILL_DAYS,
+            default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+        ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS),
+        vol.Required(
+            CONF_RECENT_REFRESH_HOURS,
+            default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
+        ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS),
+        vol.Required(
+            CONF_HISTORY_GRANULARITY,
+            default=defaults.get(CONF_HISTORY_GRANULARITY, DEFAULT_HISTORY_GRANULARITY),
+        ): vol.In(HISTORY_GRANULARITIES),
+        vol.Required(
+            CONF_IMPORT_STATISTICS,
+            default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
+        ): bool,
+        vol.Required(
+            CONF_GRID_PRICE_NET,
+            default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
+        ): _number_box(min_value=MIN_PRICE_NET, max_value=MAX_PRICE_NET),
+        vol.Required(
+            CONF_SOLAR_PRICE_NET,
+            default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
+        ): _number_box(min_value=MIN_PRICE_NET, max_value=MAX_PRICE_NET),
+        vol.Required(
+            CONF_TAX_RATE,
+            default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
+        ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE),
+        vol.Required(
+            CONF_MAX_INTERVAL_AVERAGE_KW,
+            default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
+        ): _number_box(
+            min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
+            max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
+        ),
+        vol.Required(
+            CONF_SMOOTH_INTERVAL_ANOMALIES,
+            default=defaults.get(
+                CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
+            ),
+        ): bool,
+        vol.Required(
+            CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+            default=defaults.get(
+                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
+                DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
+            ),
+        ): _number_box(
+            min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
+            max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
+        ),
+        vol.Required(
+            CONF_SMOOTHING_LOOKAROUND_DAYS,
+            default=defaults.get(
+                CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
+            ),
+        ): _number_box(
+            min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
+            max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
+        ),
+        vol.Required(
+            CONF_CACHE_INTERVAL_PAYLOADS,
+            default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
+        ): bool,
+        vol.Required(
+            CONF_WEB_FALLBACK_ENABLED,
+            default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
+        ): bool,
+        vol.Optional(
+            CONF_WEB_BASE_URL,
+            default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
+        ): str,
+        vol.Optional(
+            CONF_WEB_SESSION_ID,
+            default=defaults.get(CONF_WEB_SESSION_ID, ""),
+        ): str,
+        vol.Optional(
+            CONF_WEB_COOKIE,
+            default=defaults.get(CONF_WEB_COOKIE, ""),
+        ): str,
+        vol.Optional(
+            CONF_WEB_GRAPH_TOTAL_ID,
+            default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
+        ): str,
+        vol.Required(
+            CONF_BROWSER_PROXY_ENABLED,
+            default=defaults.get(CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED),
+        ): bool,
+        vol.Optional(
+            CONF_BROWSER_PROXY_URL,
+            default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
+        ): str,
+        vol.Optional(
+            CONF_BROWSER_PROXY_TOKEN,
+            default=defaults.get(CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN),
+        ): str,
+    }
+
+
 def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the shared config/reconfigure schema."""
     defaults = defaults or {}
-    return vol.Schema(
-        {
-            vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
-            vol.Required(CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")): str,
-            vol.Required(CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)): str,
-            vol.Required(
-                CONF_POLL_INTERVAL,
-                default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
-            vol.Required(
-                CONF_BACKFILL_DAYS,
-                default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
-            ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
-            vol.Required(
-                CONF_RECENT_REFRESH_HOURS,
-                default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-            ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
-            vol.Required(
-                CONF_HISTORY_GRANULARITY,
-                default=defaults.get(
-                    CONF_HISTORY_GRANULARITY,
-                    DEFAULT_HISTORY_GRANULARITY,
-                ),
-            ): vol.In(HISTORY_GRANULARITIES),
-            vol.Required(
-                CONF_IMPORT_STATISTICS,
-                default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
-            ): bool,
-            vol.Required(
-                CONF_GRID_PRICE_NET,
-                default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_SOLAR_PRICE_NET,
-                default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_TAX_RATE,
-                default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-            ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
-            vol.Required(
-                CONF_MAX_INTERVAL_AVERAGE_KW,
-                default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
-            ): _number_box(
-                min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
-                max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
-                step=0.1,
-                unit="kW",
-            ),
-            vol.Required(
-                CONF_SMOOTH_INTERVAL_ANOMALIES,
-                default=defaults.get(
-                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
-                ),
-            ): bool,
-            vol.Required(
-                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                default=defaults.get(
-                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
-                ),
-            ): _number_box(
-                min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-                max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
-                step=1,
-                unit="buckets",
-            ),
-            vol.Required(
-                CONF_SMOOTHING_LOOKAROUND_DAYS,
-                default=defaults.get(
-                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
-                ),
-            ): _number_box(
-                min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
-                max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
-                step=1,
-                unit="d",
-            ),
-            vol.Required(
-                CONF_CACHE_INTERVAL_PAYLOADS,
-                default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
-            ): bool,
-            vol.Required(
-                CONF_WEB_FALLBACK_ENABLED,
-                default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
-            ): bool,
-            vol.Optional(
-                CONF_WEB_BASE_URL,
-                default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
-            ): str,
-            vol.Optional(
-                CONF_WEB_SESSION_ID,
-                default=defaults.get(CONF_WEB_SESSION_ID, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_COOKIE,
-                default=defaults.get(CONF_WEB_COOKIE, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_GRAPH_TOTAL_ID,
-                default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
-            ): str,
-            vol.Required(
-                CONF_BROWSER_PROXY_ENABLED,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
-                ),
-            ): bool,
-            vol.Optional(
-                CONF_BROWSER_PROXY_URL,
-                default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
-            ): str,
-            vol.Optional(
-                CONF_BROWSER_PROXY_TOKEN,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
-                ),
-            ): str,
-        }
-    )
+    fields = {
+        vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
+        vol.Required(CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")): str,
+        vol.Required(CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)): str,
+    }
+    fields.update(_options_schema_fields(defaults))
+    return vol.Schema(fields)
 
 
 def _options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the options-only schema."""
-    defaults = defaults or {}
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_POLL_INTERVAL,
-                default=defaults.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            ): _number_box(min_value=MIN_POLL_INTERVAL, step=60, unit="s"),
-            vol.Required(
-                CONF_BACKFILL_DAYS,
-                default=defaults.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
-            ): _number_box(min_value=0, max_value=MAX_BACKFILL_DAYS, step=1, unit="d"),
-            vol.Required(
-                CONF_RECENT_REFRESH_HOURS,
-                default=defaults.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-            ): _number_box(min_value=0, max_value=MAX_RECENT_REFRESH_HOURS, step=1, unit="h"),
-            vol.Required(
-                CONF_HISTORY_GRANULARITY,
-                default=defaults.get(
-                    CONF_HISTORY_GRANULARITY,
-                    DEFAULT_HISTORY_GRANULARITY,
-                ),
-            ): vol.In(HISTORY_GRANULARITIES),
-            vol.Required(
-                CONF_IMPORT_STATISTICS,
-                default=defaults.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
-            ): bool,
-            vol.Required(
-                CONF_GRID_PRICE_NET,
-                default=defaults.get(CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_SOLAR_PRICE_NET,
-                default=defaults.get(CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET),
-            ): _number_box(
-                min_value=MIN_PRICE_NET,
-                max_value=MAX_PRICE_NET,
-                step=0.00001,
-                unit="EUR/kWh",
-            ),
-            vol.Required(
-                CONF_TAX_RATE,
-                default=defaults.get(CONF_TAX_RATE, DEFAULT_TAX_RATE),
-            ): _number_box(min_value=MIN_TAX_RATE, max_value=MAX_TAX_RATE, step=0.01),
-            vol.Required(
-                CONF_MAX_INTERVAL_AVERAGE_KW,
-                default=defaults.get(CONF_MAX_INTERVAL_AVERAGE_KW, DEFAULT_MAX_INTERVAL_AVERAGE_KW),
-            ): _number_box(
-                min_value=MIN_MAX_INTERVAL_AVERAGE_KW,
-                max_value=MAX_MAX_INTERVAL_AVERAGE_KW,
-                step=0.1,
-                unit="kW",
-            ),
-            vol.Required(
-                CONF_SMOOTH_INTERVAL_ANOMALIES,
-                default=defaults.get(
-                    CONF_SMOOTH_INTERVAL_ANOMALIES, DEFAULT_SMOOTH_INTERVAL_ANOMALIES
-                ),
-            ): bool,
-            vol.Required(
-                CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                default=defaults.get(
-                    CONF_ANOMALY_REDISTRIBUTION_WINDOW,
-                    DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
-                ),
-            ): _number_box(
-                min_value=MIN_ANOMALY_REDISTRIBUTION_WINDOW,
-                max_value=MAX_ANOMALY_REDISTRIBUTION_WINDOW,
-                step=1,
-                unit="buckets",
-            ),
-            vol.Required(
-                CONF_SMOOTHING_LOOKAROUND_DAYS,
-                default=defaults.get(
-                    CONF_SMOOTHING_LOOKAROUND_DAYS, DEFAULT_SMOOTHING_LOOKAROUND_DAYS
-                ),
-            ): _number_box(
-                min_value=MIN_SMOOTHING_LOOKAROUND_DAYS,
-                max_value=MAX_SMOOTHING_LOOKAROUND_DAYS,
-                step=1,
-                unit="d",
-            ),
-            vol.Required(
-                CONF_CACHE_INTERVAL_PAYLOADS,
-                default=defaults.get(CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS),
-            ): bool,
-            vol.Required(
-                CONF_WEB_FALLBACK_ENABLED,
-                default=defaults.get(CONF_WEB_FALLBACK_ENABLED, DEFAULT_WEB_FALLBACK_ENABLED),
-            ): bool,
-            vol.Optional(
-                CONF_WEB_BASE_URL,
-                default=defaults.get(CONF_WEB_BASE_URL, DEFAULT_WEB_BASE_URL),
-            ): str,
-            vol.Optional(
-                CONF_WEB_SESSION_ID,
-                default=defaults.get(CONF_WEB_SESSION_ID, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_COOKIE,
-                default=defaults.get(CONF_WEB_COOKIE, ""),
-            ): str,
-            vol.Optional(
-                CONF_WEB_GRAPH_TOTAL_ID,
-                default=defaults.get(CONF_WEB_GRAPH_TOTAL_ID, DEFAULT_WEB_GRAPH_TOTAL_ID),
-            ): str,
-            vol.Required(
-                CONF_BROWSER_PROXY_ENABLED,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_ENABLED, DEFAULT_BROWSER_PROXY_ENABLED
-                ),
-            ): bool,
-            vol.Optional(
-                CONF_BROWSER_PROXY_URL,
-                default=defaults.get(CONF_BROWSER_PROXY_URL, DEFAULT_BROWSER_PROXY_URL),
-            ): str,
-            vol.Optional(
-                CONF_BROWSER_PROXY_TOKEN,
-                default=defaults.get(
-                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
-                ),
-            ): str,
-        }
-    )
+    return vol.Schema(_options_schema_fields(defaults or {}))
 
 
 def _options_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -430,6 +288,7 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input[CONF_USERNAME] = str(user_input[CONF_USERNAME]).strip()
             user_input[CONF_BASE_URL] = user_input[CONF_BASE_URL].rstrip("/")
             try:
                 await _async_validate_input(self.hass, user_input)
@@ -459,11 +318,16 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(
-        self, entry_data: dict[str, Any]
+        self, _entry_data: dict[str, Any]
     ) -> config_entries.ConfigFlowResult:
         """Handle reauthentication."""
-        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        return await self.async_step_reauth_confirm(entry_data)
+        entry_id = self.context.get("entry_id")
+        self._reauth_entry = (
+            self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        )
+        if self._reauth_entry is None:
+            return self.async_abort(reason="entry_not_found")
+        return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self,
@@ -471,11 +335,15 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Confirm reauthentication credentials."""
         entry = self._reauth_entry
+        if entry is None:
+            return self.async_abort(reason="entry_not_found")
         errors: dict[str, str] = {}
         if user_input is not None:
+            username = str(user_input[CONF_USERNAME]).strip()
             merged = dict(entry.data) | {
-                CONF_USERNAME: user_input[CONF_USERNAME],
+                CONF_USERNAME: username,
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
+                CONF_BASE_URL: str(entry.data.get(CONF_BASE_URL) or DEFAULT_BASE_URL).rstrip("/"),
             }
             try:
                 await _async_validate_input(self.hass, merged)
@@ -507,8 +375,9 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         defaults = dict(entry.data) | dict(entry.options)
         defaults[CONF_PASSWORD] = ""
         if user_input is not None:
+            username = str(user_input[CONF_USERNAME]).strip()
             merged = dict(entry.data) | {
-                CONF_USERNAME: user_input[CONF_USERNAME],
+                CONF_USERNAME: username,
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
                 CONF_BASE_URL: user_input[CONF_BASE_URL].rstrip("/"),
             }
