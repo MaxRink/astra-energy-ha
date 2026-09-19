@@ -145,11 +145,15 @@ async def _async_backfill_history(
     return response
 
 
-async def _async_background_backfill(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Run a backfill task in the background and let HA log unexpected failures."""
-    await _async_backfill_history(hass, call)
-
-
+async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator) -> None:
+    """Run an initial refresh task and turn authentication failures into reauth."""
+    try:
+        await coordinator.async_refresh()
+    except ConfigEntryAuthFailed as err:
+        coordinator.config_entry.async_start_reauth(coordinator.hass)
+        _LOGGER.warning("Astra Energy initial refresh requires reauthentication: %s", err)
+    except Exception:
+        _LOGGER.exception("Astra Energy initial refresh failed")
 
 
 async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> None:
