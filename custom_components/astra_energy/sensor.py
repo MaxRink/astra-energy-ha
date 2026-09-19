@@ -40,21 +40,29 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
         key="api_status",
         translation_key="api_status",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
     SensorEntityDescription(
         key="last_successful_source",
         translation_key="last_successful_source",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["api", "web", "browser_proxy", "none", "unknown"],
     ),
     SensorEntityDescription(
         key="web_session_status",
         translation_key="web_session_status",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
     SensorEntityDescription(
         key="browser_proxy_status",
         translation_key="browser_proxy_status",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
 )
 
