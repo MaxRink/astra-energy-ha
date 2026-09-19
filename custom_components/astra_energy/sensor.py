@@ -39,21 +39,25 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
         key="api_status",
         translation_key="api_status",
+        icon="mdi:api",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
         key="last_successful_source",
         translation_key="last_successful_source",
+        icon="mdi:import",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
         key="web_session_status",
         translation_key="web_session_status",
+        icon="mdi:web",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorEntityDescription(
         key="browser_proxy_status",
         translation_key="browser_proxy_status",
+        icon="mdi:server-network",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
@@ -273,6 +277,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
     AstraSensorEntityDescription(
         key="autarky",
         translation_key="autarky",
+        icon="mdi:home-battery",
         value_attr="autarky_percent",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
@@ -280,6 +285,7 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
     AstraSensorEntityDescription(
         key="pv_co2_savings",
         translation_key="pv_co2_savings",
+        icon="mdi:leaf",
         value_attr="pv_co2_savings_t",
         native_unit_of_measurement="t",
         state_class=SensorStateClass.MEASUREMENT,
