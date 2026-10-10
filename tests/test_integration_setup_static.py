@@ -164,3 +164,17 @@ def test_reauth_updates_existing_entry_and_handles_removed_entry() -> None:
     assert 'self.context.get("entry_id")' in source
     assert 'self.async_abort(reason="entry_not_found")' in source
     assert "self.async_update_reload_and_abort(entry, data_updates=merged)" in source
+    assert "async_entry_for_domain_unique_id" in source
+    assert "existing is None or existing.entry_id != entry.entry_id" in source
+    assert "existing.entry_id != entry.entry_id" in source
+    assert "errors[\"base\"] = \"already_configured\"" in source
+
+
+def test_reauth_does_not_abort_when_username_belongs_to_same_entry() -> None:
+    """Reauth must allow the entry's own unique ID through the duplicate guard."""
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "astra_energy" / "config_flow.py"
+    ).read_text(encoding="utf-8")
+
+    assert source.count("self._abort_if_unique_id_configured()") == 1
+    assert "async_update_reload_and_abort(entry, data_updates=merged)" in source
