@@ -699,11 +699,12 @@ def _is_recorder_fallback_recovery(
 ) -> bool:
     """Return whether a consistent provider reading can recover fallback state.
 
-    The latest meter-stand endpoint does not always include a measurement
-    timestamp.  A recorder fallback therefore cannot require one here; the
-    provider's source counters must still reconcile with its total before the
-    larger, bounded startup recovery allowance is used.
+    The larger startup allowance is only safe when the provider supplies a
+    measurement timestamp.  Without an authoritative age anchor, even
+    internally consistent counters remain deferred.
     """
+    if reading.timestamp is None:
+        return False
     if (
         not previous.raw
         or previous.raw.get("source") != "recorder_fallback"
