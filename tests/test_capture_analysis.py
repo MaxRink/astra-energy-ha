@@ -3566,6 +3566,16 @@ def test_api_status_sensor_is_unavailable_before_first_update() -> None:
     assert sensor.native_value is None
 
 
+def test_last_successful_source_enum_covers_runtime_sources() -> None:
+    description = next(
+        description
+        for description in astra_sensor.COORDINATOR_SENSOR_DESCRIPTIONS
+        if description.key == "last_successful_source"
+    )
+
+    assert {"mobile", "recorder", "browser_proxy"}.issubset(set(description.options))
+
+
 def test_deferred_provider_total_sensors_remain_unavailable() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="meter",
