@@ -159,6 +159,21 @@ def _response_shape(text: str) -> str:
     return "plain text"
 
 
+def _safe_content_type(response: Any) -> str:
+    """Classify a response content type without logging provider-controlled text."""
+    headers = getattr(response, "headers", None)
+    value = str(headers.get("Content-Type") or "").casefold() if headers else ""
+    if "json" in value:
+        return "json"
+    if "html" in value:
+        return "html"
+    if value.startswith("text/"):
+        return "text"
+    if value:
+        return "other"
+    return "unknown"
+
+
 def _auth_status(value: Any) -> bool | None:
     """Return the explicit authentication status in a provider response."""
     if isinstance(value, bool):
@@ -1348,7 +1363,18 @@ class AstraClient:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=self._request_timeout,
             ) as response:
-                text = await response.text()
+                read = getattr(response, "read", None)
+                if callable(read):
+                    raw_body = await read()
+                    encoding = "utf-8"
+                    get_encoding = getattr(response, "get_encoding", None)
+                    if callable(get_encoding):
+                        encoding = get_encoding() or encoding
+                    text = raw_body.decode(encoding, errors="replace")
+                    response_bytes = len(raw_body)
+                else:
+                    text = await response.text()
+                    response_bytes = len(text.encode("utf-8"))
                 if response.status >= 400:
                     if response.status in {401, 403} and self._authenticated:
                         self._authenticated = False
@@ -1365,13 +1391,9 @@ class AstraClient:
         try:
             return _checksum_verified_body(text)
         except AstraDeferredDataError as err:
-            content_type = "unknown"
-            headers = getattr(response, "headers", None)
-            if headers:
-                content_type = str(headers.get("Content-Type") or "unknown").split(";", 1)[0]
             raise AstraDeferredDataError(
-                f"{err}; http_status={response.status}; response_bytes={len(text)}; "
-                f"content_type={content_type}"
+                f"{err}; http_status={response.status}; response_bytes={response_bytes}; "
+                f"content_type={_safe_content_type(response)}"
             ) from err
 
     async def async_login(self) -> None:  # pragma: no cover
