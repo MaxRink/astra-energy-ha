@@ -3701,7 +3701,14 @@ def test_diagnostic_status_enums_cover_fallback_states() -> None:
         description.key: description
         for description in astra_sensor.COORDINATOR_SENSOR_DESCRIPTIONS
     }
-    assert {"browser_proxy", "deferred", "invalid_auth"}.issubset(
+    assert {
+        "unknown",
+        "browser_proxy",
+        "deferred",
+        "invalid_auth",
+        "unavailable",
+        "protocol_error",
+    }.issubset(
         set(descriptions["api_status"].options)
     )
     assert {"not_configured", "login_required", "invalid_response", "no_data"}.issubset(
