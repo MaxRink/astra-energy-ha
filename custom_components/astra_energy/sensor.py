@@ -54,7 +54,7 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
         icon="mdi:import",
         entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.ENUM,
-        options=["api", "web", "browser_proxy", "none", "unknown"],
+        options=["mobile", "recorder", "api", "web", "browser_proxy", "none", "unknown"],
     ),
     AstraCoordinatorSensorEntityDescription(
         key="web_session_status",
