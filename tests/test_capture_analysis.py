@@ -386,6 +386,41 @@ def test_parse_combines_total_grid_and_solar_rows() -> None:
     assert readings[0].raw["channels"]["solar"]["raw_meter_id"] == "TEST_SOLAR_0"
 
 
+def test_parse_combined_reading_preserves_zero_grid_total() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    readings = client._meter_stands_from_payload(
+        {
+            "auth": "1",
+            "data": [
+                {
+                    "v01": "TEST_TOTAL/0",
+                    "v02": "5,000",
+                    "v03": "kWh",
+                    "v05": "19.06.2026",
+                    "v06": "Strom VGB",
+                    "v07": "Wohnung Strom",
+                },
+                {
+                    "v01": "TEST_GRID/0",
+                    "v02": "0,000",
+                    "v03": "kWh",
+                    "v05": "19.06.2026",
+                    "v06": "Strom T1 (Netzbezug)",
+                    "v07": "Wohnung Netzstrom",
+                },
+            ],
+        }
+    )
+
+    assert readings[0].grid_kwh_total == 0.0
+    assert readings[0].raw_grid_kwh_total == 0.0
+
+
 def test_channel_classification_and_ungrouped_reading() -> None:
     assert astra_api._meter_channel_kind("x", "other", "misc") == "generic"
     reading = astra_api._reading_from_channel(
@@ -934,6 +969,41 @@ def test_interval_history_uses_cached_day_when_fetch_fails() -> None:
         dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.UTC),
     ]
     assert [reading.total_kwh for reading in readings] == [100.25, 100.5]
+
+
+def test_interval_history_propagates_auth_failures_instead_of_using_cache() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+    template = astra_api.AstraMeterReading(
+        meter_id="meter_1",
+        meter_name="Main meter",
+        timestamp=dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=0.0,
+        total_kwh=100.0,
+    )
+
+    async def auth_failed(*_args, **_kwargs):
+        raise astra_api.AstraSessionExpiredError("expired")
+
+    client._get_json = auth_failed
+    with pytest.raises(astra_api.AstraSessionExpiredError):
+        asyncio.run(
+            client.async_get_historical_interval_meter_stands(
+                dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+                dt.datetime(2026, 6, 20, 23, 59, tzinfo=dt.UTC),
+                end_template=template,
+                payload_cache={"2026-06-20": {"data": []}},
+                cache_before=dt.datetime(2026, 6, 19, tzinfo=dt.UTC),
+            )
+        )
 
 
 def test_interval_history_defers_without_cumulative_baseline() -> None:
@@ -1538,6 +1608,24 @@ def test_browser_proxy_payload_maps_current_web_widget_values() -> None:
     assert reading.current_year_solar_kwh == 493.796
     assert reading.grid_price_gross_eur_per_kwh == pytest.approx(0.34986)
     assert reading.raw["source"] == "browser_proxy"
+
+
+def test_browser_proxy_payload_preserves_zero_raw_grid_total() -> None:
+    readings = browser_proxy.parse_browser_proxy_payload(
+        {
+            "ok": True,
+            "meter": {
+                "meter_id": "meter-1",
+                "timestamp": "2026-06-20T12:00:00+00:00",
+                "grid_kwh": 0,
+                "solar_kwh": 5,
+                "total_kwh": 5,
+                "raw_grid_kwh": 0,
+            },
+        }
+    )
+
+    assert readings[0].unsmoothed_grid_kwh_total == 0.0
 
 
 def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) -> None:
@@ -2261,6 +2349,79 @@ def test_coordinator_still_rejects_implausible_recorder_fallback_recovery(
     assert coordinator.api_status == "deferred"
     assert coordinator.last_error["type"] == "AstraDeferredDataError"
     assert calls[1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
+
+
+def test_recorder_fallback_recovery_rejects_consistent_untimestamped_catchup() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_fallback"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=6109.155,
+        grid_kwh_total=6109.155,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+
+    assert not astra_coordinator._is_recorder_fallback_recovery(reading, previous)
+    assert astra_coordinator._live_jump_limit(
+        reading,
+        previous,
+        max_average_kw=50.0,
+        elapsed_hours=None,
+    ) == 50.0
+
+
+def test_recorder_fallback_recovery_rejects_missing_source_or_foreign_meter() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_fallback"},
+    )
+    missing_source = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=None,
+        grid_kwh_total=None,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+    foreign_meter = astra_api.AstraMeterReading(
+        meter_id="OTHER_METER",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=6109.155,
+        grid_kwh_total=6109.155,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        missing_source, previous
+    )
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        foreign_meter, previous
+    )
 
 
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
@@ -3581,7 +3742,14 @@ def test_diagnostic_status_enums_cover_fallback_states() -> None:
         description.key: description
         for description in astra_sensor.COORDINATOR_SENSOR_DESCRIPTIONS
     }
-    assert {"browser_proxy", "deferred", "invalid_auth"}.issubset(
+    assert {
+        "unknown",
+        "browser_proxy",
+        "deferred",
+        "invalid_auth",
+        "unavailable",
+        "protocol_error",
+    }.issubset(
         set(descriptions["api_status"].options)
     )
     assert {"not_configured", "login_required", "invalid_response", "no_data"}.issubset(

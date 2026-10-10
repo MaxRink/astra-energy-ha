@@ -77,7 +77,9 @@ MAX_ANOMALY_REDISTRIBUTION_WINDOW = 672
 MIN_SMOOTHING_LOOKAROUND_DAYS = 0
 MAX_SMOOTHING_LOOKAROUND_DAYS = 14
 
-DAILY_INTERVAL_CONCURRENCY = 8
+# Astra's historical endpoint is slow and rate-sensitive. Keep a small
+# bounded window so one backfill does not create a burst of parallel sessions.
+DAILY_INTERVAL_CONCURRENCY = 2
 
 ATTR_METER_ID = "meter_id"
 ATTR_RAW_METER_ID = "raw_meter_id"

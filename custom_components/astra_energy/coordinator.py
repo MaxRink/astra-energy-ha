@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -155,6 +156,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         }
         self._recorder_baselines_loaded = False
         self._last_mobile_success_at = None
+        self._backfill_lock = asyncio.Lock()
 
     async def _async_update_data(self) -> dict[str, AstraMeterReading]:
         """Fetch latest Astra data."""
@@ -695,18 +697,28 @@ def _is_recorder_fallback_recovery(
     reading: AstraMeterReading,
     previous: AstraMeterReading,
 ) -> bool:
-    """Return whether a timestamped provider reading can recover stale fallback state."""
+    """Return whether a consistent provider reading can recover fallback state.
+
+    The larger startup allowance is only safe when the provider supplies a
+    measurement timestamp.  Without an authoritative age anchor, even
+    internally consistent counters remain deferred.
+    """
     if reading.timestamp is None:
         return False
-    if not previous.raw or previous.raw.get("source") != "recorder_fallback":
+    if (
+        not previous.raw
+        or previous.raw.get("source") != "recorder_fallback"
+        or reading.meter_id != previous.meter_id
+    ):
+        return False
+    if reading.raw and reading.raw.get("source") == "browser_proxy":
         return False
     if reading.total_kwh is None:
         return False
     source_sum = _source_sum(reading)
-    return (
-        source_sum is None
-        or abs(source_sum - reading.total_kwh) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
-    )
+    return source_sum is not None and abs(
+        source_sum - reading.total_kwh
+    ) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
 
 
 def _source_sum(reading: AstraMeterReading) -> float | None:

@@ -141,7 +141,7 @@ def parse_browser_proxy_payload(
             grid_kwh_total=grid,
             solar_kwh_total=solar,
             total_kwh=total,
-            unsmoothed_grid_kwh_total=raw_grid or grid,
+            unsmoothed_grid_kwh_total=raw_grid if raw_grid is not None else grid,
             unsmoothed_solar_kwh_total=solar,
             unsmoothed_total_kwh=total,
             raw_grid_kwh_total=raw_grid,
