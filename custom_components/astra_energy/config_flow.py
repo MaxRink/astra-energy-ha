@@ -363,8 +363,24 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001
                 errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(user_input[CONF_USERNAME].strip().lower())
-                self._abort_if_unique_id_configured()
+                unique_id = username.casefold()
+                existing = self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, unique_id
+                )
+                if existing is None or existing.entry_id != entry.entry_id:
+                    errors["base"] = "already_configured"
+                    return self.async_show_form(
+                        step_id="reauth_confirm",
+                        data_schema=vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")
+                                ): str,
+                                vol.Required(CONF_PASSWORD): str,
+                            }
+                        ),
+                        errors=errors,
+                    )
                 self.hass.config_entries.async_update_entry(
                     entry, title=f"Astra Energy ({user_input[CONF_USERNAME]})"
                 )
@@ -406,8 +422,18 @@ class AstraEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001
                 errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(user_input[CONF_USERNAME].strip().lower())
-                self._abort_if_unique_id_configured()
+                unique_id = username.casefold()
+                existing = self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, unique_id
+                )
+                if existing is None or existing.entry_id != entry.entry_id:
+                    errors["base"] = "already_configured"
+                    return self.async_show_form(
+                        step_id="reconfigure",
+                        data_schema=_data_schema(defaults),
+                        errors=errors,
+                    )
+                await self.async_set_unique_id(unique_id)
                 self.hass.config_entries.async_update_entry(
                     entry, title=f"Astra Energy ({user_input[CONF_USERNAME]})"
                 )
