@@ -704,17 +704,20 @@ def _is_recorder_fallback_recovery(
     provider's source counters must still reconcile with its total before the
     larger, bounded startup recovery allowance is used.
     """
-    if not previous.raw or previous.raw.get("source") != "recorder_fallback":
+    if (
+        not previous.raw
+        or previous.raw.get("source") != "recorder_fallback"
+        or reading.meter_id != previous.meter_id
+    ):
         return False
     if reading.raw and reading.raw.get("source") == "browser_proxy":
         return False
     if reading.total_kwh is None:
         return False
     source_sum = _source_sum(reading)
-    return (
-        source_sum is None
-        or abs(source_sum - reading.total_kwh) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
-    )
+    return source_sum is not None and abs(
+        source_sum - reading.total_kwh
+    ) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
 
 
 def _source_sum(reading: AstraMeterReading) -> float | None:

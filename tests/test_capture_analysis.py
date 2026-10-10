@@ -2383,6 +2383,47 @@ def test_recorder_fallback_recovery_allows_consistent_untimestamped_catchup() ->
     ) == 1500.0
 
 
+def test_recorder_fallback_recovery_rejects_missing_source_or_foreign_meter() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_fallback"},
+    )
+    missing_source = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=None,
+        grid_kwh_total=None,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+    foreign_meter = astra_api.AstraMeterReading(
+        meter_id="OTHER_METER",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=6109.155,
+        grid_kwh_total=6109.155,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        missing_source, previous
+    )
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        foreign_meter, previous
+    )
+
+
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
     calls = []
 
