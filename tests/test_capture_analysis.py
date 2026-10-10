@@ -77,6 +77,7 @@ class StubSensorEntityDescription:
     entity_category: str | None = None
     entity_registry_enabled_default: bool = True
     suggested_display_precision: int | None = None
+    options: tuple[str, ...] | list[str] | None = None
 
 
 class StubSensorEntity:
@@ -89,6 +90,7 @@ homeassistant_const_mod.UnitOfEnergy = types.SimpleNamespace(KILO_WATT_HOUR="kWh
 homeassistant_const_mod.UnitOfPower = types.SimpleNamespace(WATT="W")
 homeassistant_sensor_mod.SensorDeviceClass = types.SimpleNamespace(
     ENERGY="energy",
+    ENUM="enum",
     MONETARY="monetary",
     POWER="power",
 )
