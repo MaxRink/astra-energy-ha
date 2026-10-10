@@ -448,7 +448,12 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
     def native_value(self):
         """Return coordinator status."""
         if self.entity_description.key == "api_status":
-            return self.coordinator.api_status
+            # Home Assistant reserves ``unknown`` and ``unavailable`` as
+            # state-machine values. Returning them as a sensor state raises
+            # during entity setup; ``None`` correctly keeps the diagnostic
+            # sensor unavailable until the first coordinator result.
+            status = self.coordinator.api_status
+            return None if status in {None, "unknown", "unavailable"} else status
         if self.entity_description.key == "last_successful_source":
             return self.coordinator.last_successful_source
         if self.entity_description.key == "web_session_status":
