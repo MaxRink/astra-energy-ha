@@ -3547,6 +3547,22 @@ def test_deferred_recorder_fallback_total_sensors_remain_available() -> None:
     assert price_sensor.available is True
 
 
+def test_api_status_sensor_is_unavailable_before_first_update() -> None:
+    coordinator = types.SimpleNamespace(
+        api_status="unknown",
+        config_entry=types.SimpleNamespace(entry_id="entry"),
+    )
+    description = next(
+        description
+        for description in astra_sensor.COORDINATOR_SENSOR_DESCRIPTIONS
+        if description.key == "api_status"
+    )
+
+    sensor = astra_sensor.AstraCoordinatorSensor(coordinator, description)
+
+    assert sensor.native_value is None
+
+
 def test_deferred_provider_total_sensors_remain_unavailable() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="meter",
