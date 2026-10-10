@@ -4378,6 +4378,34 @@ def test_post_action_falls_back_between_mobile_endpoints() -> None:
     assert session.calls == [bad_url, good_url, good_url]
 
 
+def test_post_action_reports_sanitized_deferred_response_metadata() -> None:
+    first_url = "https://bad.example.test/csandroid.php"
+    second_url = "https://also-bad.example.test/csios.php"
+    session = EndpointSession(
+        {
+            first_url: [FakeResponse("")],
+            second_url: [FakeResponse("")],
+        }
+    )
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="secret",
+        base_url=f"{first_url},{second_url}",
+    )
+    client._base_urls = [first_url, second_url]
+
+    with pytest.raises(astra_api.AstraDeferredDataError) as raised:
+        asyncio.run(client._post_action("get_mtr_akt", s_sid="sid"))
+
+    message = str(raised.value)
+    assert "Astra action get_mtr_akt" in message
+    assert "trying 2 endpoint(s)" in message
+    assert "response_bytes=0" in message
+    assert "secret" not in message
+    assert "sid" not in message
+
+
 def test_post_action_preserves_auth_rejection_over_later_endpoint_failure() -> None:
     first_url = "https://auth.example.test/csandroid.php"
     second_url = "https://network.example.test/csios.php"
