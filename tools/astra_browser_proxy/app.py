@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -388,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if CONFIG.bind != "127.0.0.1" and not CONFIG.shared_token:
         raise RuntimeError("Refusing to start unauthenticated proxy on non-loopback address. Set ASTRA_SHARED_TOKEN or bind to 127.0.0.1.")
-    server = ThreadingHTTPServer((CONFIG.bind, CONFIG.port), Handler)
+    server = HTTPServer((CONFIG.bind, CONFIG.port), Handler)
     LOGGER.info("Starting Astra browser proxy on %s:%s", CONFIG.bind, CONFIG.port)
     server.serve_forever()
 
