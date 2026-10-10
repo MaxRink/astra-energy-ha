@@ -4206,9 +4206,16 @@ def test_statistics_helpers_shape_batches_and_sparse_rows() -> None:
 
 
 class FakeResponse:
-    def __init__(self, text: str, status: int = 200) -> None:
+    def __init__(
+        self,
+        text: str,
+        status: int = 200,
+        content_type: str | None = None,
+    ) -> None:
         self._text = text
+        self._raw = text.encode("utf-8")
         self.status = status
+        self.headers = {"Content-Type": content_type} if content_type else {}
 
     async def __aenter__(self):
         return self
@@ -4218,6 +4225,12 @@ class FakeResponse:
 
     async def text(self, *_args, **_kwargs) -> str:
         return self._text
+
+    async def read(self) -> bytes:
+        return self._raw
+
+    def get_encoding(self) -> str:
+        return "utf-8"
 
 
 class FakeSession:
@@ -4404,6 +4417,25 @@ def test_post_action_reports_sanitized_deferred_response_metadata() -> None:
     assert "response_bytes=0" in message
     assert "secret" not in message
     assert "sid" not in message
+
+
+def test_deferred_response_metadata_uses_wire_bytes_and_safe_content_type() -> None:
+    client = astra_api.AstraClient(
+        FakeSession(
+            response=FakeResponse("ä", content_type="application/json; secret=value")
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(astra_api.AstraDeferredDataError) as raised:
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+
+    message = str(raised.value)
+    assert "response_bytes=2" in message
+    assert "content_type=json" in message
+    assert "secret=value" not in message
 
 
 def test_post_action_preserves_auth_rejection_over_later_endpoint_failure() -> None:
