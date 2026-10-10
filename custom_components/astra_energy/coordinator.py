@@ -697,10 +697,16 @@ def _is_recorder_fallback_recovery(
     reading: AstraMeterReading,
     previous: AstraMeterReading,
 ) -> bool:
-    """Return whether a timestamped provider reading can recover stale fallback state."""
-    if reading.timestamp is None:
-        return False
+    """Return whether a consistent provider reading can recover fallback state.
+
+    The latest meter-stand endpoint does not always include a measurement
+    timestamp.  A recorder fallback therefore cannot require one here; the
+    provider's source counters must still reconcile with its total before the
+    larger, bounded startup recovery allowance is used.
+    """
     if not previous.raw or previous.raw.get("source") != "recorder_fallback":
+        return False
+    if reading.raw and reading.raw.get("source") == "browser_proxy":
         return False
     if reading.total_kwh is None:
         return False

@@ -2351,6 +2351,38 @@ def test_coordinator_still_rejects_implausible_recorder_fallback_recovery(
     assert calls[1][1][1] == astra_coordinator.ISSUE_API_DEFERRED
 
 
+def test_recorder_fallback_recovery_allows_consistent_untimestamped_catchup() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_fallback"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=6109.155,
+        grid_kwh_total=6109.155,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+    )
+
+    assert astra_coordinator._is_recorder_fallback_recovery(reading, previous)
+    assert astra_coordinator._live_jump_limit(
+        reading,
+        previous,
+        max_average_kw=50.0,
+        elapsed_hours=None,
+    ) == 1500.0
+
+
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
     calls = []
 
