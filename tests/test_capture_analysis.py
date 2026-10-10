@@ -4438,6 +4438,13 @@ def test_deferred_response_metadata_uses_wire_bytes_and_safe_content_type() -> N
     assert "secret=value" not in message
 
 
+def test_safe_content_type_uses_fixed_labels() -> None:
+    assert astra_api._safe_content_type(types.SimpleNamespace(headers={"Content-Type": "text/html"})) == "html"
+    assert astra_api._safe_content_type(types.SimpleNamespace(headers={"Content-Type": "text/plain"})) == "text"
+    assert astra_api._safe_content_type(types.SimpleNamespace(headers={"Content-Type": "image/png"})) == "other"
+    assert astra_api._safe_content_type(types.SimpleNamespace(headers={})) == "unknown"
+
+
 def test_post_action_preserves_auth_rejection_over_later_endpoint_failure() -> None:
     first_url = "https://auth.example.test/csandroid.php"
     second_url = "https://network.example.test/csios.php"
