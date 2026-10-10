@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Audit Home Assistant Energy dashboard recorder statistics.
 
 This intentionally lives outside the integration runtime. It is a support tool
@@ -8,11 +7,11 @@ for diagnosing recorder gaps/spikes in a Home Assistant SQLite database.
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import sqlite3
 
 
 @dataclass(frozen=True)

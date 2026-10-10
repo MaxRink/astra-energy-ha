@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
 """Export Astra web session details from a Chrome DevTools Protocol session."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlsplit
 
 try:

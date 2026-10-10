@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, time, timedelta
-from hashlib import md5
 import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, time, timedelta
+from hashlib import md5
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -17,8 +17,8 @@ from .const import (
     DAILY_INTERVAL_CONCURRENCY,
     DEFAULT_ANOMALY_REDISTRIBUTION_WINDOW,
     DEFAULT_GRID_PRICE_NET,
-    DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
+    DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
@@ -32,17 +32,49 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 ASTRA_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
+_SENSITIVE_TEXT_RE = re.compile(
+    r"(?ix)"
+    r"""["']?(?:[a-z0-9]+_)*(?:authorization|bearer|cookie|password|passwd|secret|"""
+    r"""sessionid|session_id|sid|token)["']?\s*[:=]\s*"""
+    r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|"""
+    r"""(?:Bearer|Basic|Token)\s+[^\s,;}']+|[^\s,;}]+)"""
+)
+
+
+def _sanitize_error_text(value: Any, secrets: tuple[str, ...] = ()) -> str:
+    """Return a compact error message without common credential fields."""
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    for secret in sorted((item for item in secrets if item), key=len, reverse=True):
+        text = text.replace(secret, "<redacted>")
+    text = _SENSITIVE_TEXT_RE.sub("<redacted>", text)
+    return text[:500]
+
 
 class AstraApiError(Exception):
     """Base Astra API error."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(_sanitize_error_text(message))
 
 
 class AstraAuthError(AstraApiError):
     """Authentication failed or the session expired."""
 
 
-class AstraApiNotDocumentedError(AstraApiError):
-    """Raised until confirmed Astra endpoints are wired in."""
+class AstraInvalidCredentialsError(AstraAuthError):
+    """Astra explicitly rejected the configured credentials."""
+
+
+class AstraSessionExpiredError(AstraAuthError):
+    """Astra explicitly rejected an authenticated session."""
+
+
+class AstraNetworkError(AstraApiError):
+    """Astra could not be reached or the request failed transiently."""
+
+
+class AstraHttpError(AstraApiError):
+    """Astra returned an unsuccessful HTTP status."""
 
 
 class AstraProtocolError(AstraApiError):
@@ -101,18 +133,6 @@ class AstraMeterReading:
     raw: dict[str, Any] | None = None
 
 
-@dataclass(frozen=True)
-class AstraAccountInfo:
-    """Basic authenticated Astra account information."""
-
-    username: str
-    company_id: str | None
-    company_name: str | None
-    selected_location_id: str | None
-    selected_location_name: str | None
-    is_tenant: bool
-
-
 def _md5(value: str) -> str:
     """Return lowercase MD5 hex digest used by Astra's Android API."""
     return md5(value.encode()).hexdigest()
@@ -132,11 +152,74 @@ def _response_shape(text: str) -> str:
     """Return a safe, compact response shape for protocol errors."""
     stripped = text.lstrip()
     lower = stripped[:256].casefold()
-    if lower.startswith("<!doctype html") or lower.startswith("<html") or "<html" in lower:
+    if lower.startswith(("<!doctype html", "<html")) or "<html" in lower:
         return "HTML"
-    if lower.startswith("{") or lower.startswith("["):
+    if lower.startswith(("{", "[")):
         return "JSON"
     return "plain text"
+
+
+def _auth_status(value: Any) -> bool | None:
+    """Return the explicit authentication status in a provider response."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"1", "true", "yes", "ok", "success"}:
+            return True
+        if normalized in {"0", "false", "no", "failed", "failure", "invalid"}:
+            return False
+    return None
+
+
+def _response_reason(
+    data: dict[str, Any], default: str, secrets: tuple[str, ...] = ()
+) -> str:
+    """Return a useful provider reason without copying arbitrary response data."""
+    for key in (
+        "error",
+        "error_message",
+        "message",
+        "msg",
+        "reason",
+        "detail",
+        "status",
+    ):
+        value = data.get(key)
+        if isinstance(value, str):
+            reason = _sanitize_error_text(value, secrets)
+            if reason:
+                return reason
+    return default
+
+
+def _is_auth_rejection(data: dict[str, Any]) -> bool:
+    """Return whether a response explicitly describes an authentication failure."""
+    status = _auth_status(data.get("auth"))
+    if status is False:
+        return True
+    if status is True:
+        return False
+    reason = _response_reason(data, "").casefold()
+    return any(
+        marker in reason
+        for marker in (
+            "authentication failed",
+            "invalid credential",
+            "invalid password",
+            "login failed",
+            "unauthorized",
+            "wrong password",
+            "zugangsdaten",
+            "passwort",
+        )
+    )
 
 
 def _checksum_verified_body(text: str) -> str:
@@ -487,7 +570,7 @@ def _parse_datetime(value: Any) -> datetime | None:
     text = str(value).strip()
     for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(text, fmt).replace(tzinfo=UTC)
+            return datetime.strptime(text, fmt).replace(tzinfo=ASTRA_TIME_ZONE).astimezone(UTC)
         except ValueError:
             continue
     return None
@@ -788,9 +871,7 @@ def _redistribution_weights(
             return [weight / total for weight in profile_weights]
     weights = []
     for index in indexes:
-        if index == exclude_weight_index:
-            weight = 0.0
-        elif index in ignore_weight_indexes:
+        if index == exclude_weight_index or index in ignore_weight_indexes:
             weight = 0.0
         else:
             weight = sum(max(float(points[index].get(key) or 0.0), 0.0) for key in weight_keys)
@@ -1202,17 +1283,15 @@ class AstraClient:
         self._session = session
         self._username = username
         self._password = password
-        self._base_url = base_url.rstrip("/")
         self._base_urls = _base_urls_from_config(base_url)
         self._authenticated = False
         self._sid = _session_id(username, password)
         self._location_id = "-1"
-        self._year = str(datetime.now().year)
+        self._year = str(datetime.now(ASTRA_TIME_ZONE).year)
         self._month = "-1"
         self._date = "-1"
         self._medium = "1"
         self._language = "de"
-        self._last_login_payload: dict[str, Any] = {}
         self._grid_price_net = float(grid_price_net)
         self._solar_price_net = float(solar_price_net)
         self._tax_rate = float(tax_rate)
@@ -1242,16 +1321,15 @@ class AstraClient:
                     **params,
                 }
                 return await self._post_raw_at_url(url, payload)
+            except AstraAuthError:
+                self._authenticated = False
+                raise
             except AstraApiError as err:
                 last_error = err
                 _LOGGER.debug("Astra mobile endpoint failed for action=%s url=%s: %s", action, url, err)
         if last_error is not None:
             raise last_error
         raise AstraApiError("No Astra mobile endpoints configured")
-
-    async def _post_raw(self, payload: dict[str, str]) -> str:  # pragma: no cover
-        """POST form data and return the checksum-verified body payload."""
-        return await self._post_raw_at_url(self._base_url, payload)
 
     async def _post_raw_at_url(
         self, url: str, payload: dict[str, str]
@@ -1267,11 +1345,18 @@ class AstraClient:
             ) as response:
                 text = await response.text()
                 if response.status >= 400:
-                    raise AstraApiError(f"Astra HTTP {response.status}")
+                    if response.status in {401, 403} and self._authenticated:
+                        self._authenticated = False
+                        raise AstraSessionExpiredError(
+                            f"Astra session rejected (HTTP {response.status})"
+                        )
+                    raise AstraHttpError(f"Astra HTTP {response.status}")
         except AstraApiError:
             raise
-        except Exception as err:  # noqa: BLE001
-            raise AstraApiError(f"Astra request failed: {type(err).__name__}: {err}") from err
+        except Exception as err:
+            raise AstraNetworkError(
+                f"Astra request failed: {type(err).__name__}: {_sanitize_error_text(err)}"
+            ) from err
         return _checksum_verified_body(text)
 
     async def async_login(self) -> None:  # pragma: no cover
@@ -1290,30 +1375,24 @@ class AstraClient:
             data = json.loads(payload)
         except ValueError as err:
             raise AstraProtocolError("Astra login response is not JSON") from err
-        if str(data.get("auth", "0")) != "1":
-            raise AstraAuthError("Astra authentication failed")
-        self._last_login_payload = data
+        if not isinstance(data, dict):
+            raise AstraProtocolError("Astra login response is not an object")
+        auth_status = _auth_status(data.get("auth"))
+        if auth_status is False or (
+            auth_status is None and _is_auth_rejection(data)
+        ):
+            self._authenticated = False
+            raise AstraInvalidCredentialsError(
+                _response_reason(
+                    data,
+                    "Astra authentication failed",
+                    (self._username, self._password, self._sid),
+                )
+            )
+        if auth_status is not True:
+            raise AstraProtocolError("Astra login response has no valid auth status")
         self._location_id = str(data.get("immo_sel") or self._location_id)
         self._authenticated = True
-
-    async def async_get_account_info(self) -> AstraAccountInfo:  # pragma: no cover
-        """Authenticate and return basic account information."""
-        if not self._authenticated:
-            await self.async_login()
-        locations = self._last_login_payload.get("standort_list") or []
-        selected_location_name = None
-        for location in locations:
-            if str(location.get("id")) == self._location_id:
-                selected_location_name = str(location.get("name") or "")
-                break
-        return AstraAccountInfo(
-            username=str(self._last_login_payload.get("user") or self._username),
-            company_id=str(self._last_login_payload.get("comp_id") or "") or None,
-            company_name=str(self._last_login_payload.get("comp_name") or "") or None,
-            selected_location_id=self._location_id,
-            selected_location_name=selected_location_name,
-            is_tenant=str(self._last_login_payload.get("is_mieter") or "0") == "1",
-        )
 
     async def _get_json(self, action: str, **overrides: str) -> dict[str, Any]:  # pragma: no cover
         """Fetch one authenticated JSON endpoint."""
@@ -1338,9 +1417,22 @@ class AstraClient:
             data = json.loads(payload)
         except ValueError as err:
             raise AstraProtocolError(f"Astra {action} response is not JSON") from err
-        if str(data.get("auth", "0")) != "1":
+        if not isinstance(data, dict):
+            raise AstraProtocolError(f"Astra {action} response is not an object")
+        auth_status = _auth_status(data.get("auth"))
+        if auth_status is False or (
+            auth_status is None and _is_auth_rejection(data)
+        ):
             self._authenticated = False
-            raise AstraAuthError("Astra session expired")
+            raise AstraSessionExpiredError(
+                _response_reason(
+                    data,
+                    "Astra session expired",
+                    (self._username, self._password, self._sid),
+                )
+            )
+        if auth_status is not True:
+            raise AstraProtocolError(f"Astra {action} response has no valid auth status")
         rows = data.get("data")
         row_count = len(rows) if isinstance(rows, list) else None
         _LOGGER.debug(
@@ -1522,7 +1614,10 @@ class AstraClient:
                 ] = reading
         return sorted(
             readings_by_key.values(),
-            key=lambda reading: (reading.timestamp or datetime.min, reading.meter_id),
+            key=lambda reading: (
+                reading.timestamp or datetime.min.replace(tzinfo=UTC),
+                reading.meter_id,
+            ),
         )
 
     async def async_get_historical_interval_meter_stands(  # pragma: no cover
@@ -1820,7 +1915,7 @@ class AstraClient:
 
     async def _read_monthly_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-month medium metrics from Astra."""
-        today = datetime.now(UTC).date()
+        today = datetime.now(ASTRA_TIME_ZONE).date()
         try:
             data = await self._get_json(
                 "get_mtr_vbmed",

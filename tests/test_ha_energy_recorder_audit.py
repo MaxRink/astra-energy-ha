@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -11,8 +11,8 @@ from tools.ha_energy_recorder_audit import (
     find_suspicious_deltas,
     find_suspicious_rows,
     repair_counter_resets,
-    repair_suspicious_rows,
     repair_statistic_gaps,
+    repair_suspicious_rows,
     statistic_ids_from_energy_prefs,
 )
 

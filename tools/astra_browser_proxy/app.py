@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from html import unescape
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import os
 import re
 import threading
+from dataclasses import dataclass
+from datetime import datetime
+from html import unescape
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -33,7 +33,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class ProxyConfig:
-    bind: str = os.getenv("ASTRA_BIND", "0.0.0.0")
+    bind: str = os.getenv("ASTRA_BIND", "127.0.0.1")
     port: int = int(os.getenv("ASTRA_PORT", "43104"))
     profile_dir: str = os.getenv("ASTRA_PROFILE_DIR", "/profile")
     headless: bool = _env_bool("ASTRA_HEADLESS", False)
@@ -134,7 +134,7 @@ class AstraBrowserSession:
                 timezone="Europe/Berlin",
                 args=[
                     "--remote-debugging-port=9222",
-                    "--remote-debugging-address=0.0.0.0",
+                    "--remote-debugging-address=127.0.0.1",
                     "--disable-http2",
                 ],
             )
@@ -158,7 +158,8 @@ class AstraBrowserSession:
                 locator = page.locator(selector).first
                 if locator.count():
                     locator.fill(value, timeout=2000)
-            except Exception:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001
+                LOGGER.debug("Could not fill login selector %s: %s", selector, err)
                 continue
         for selector in (
             "button[type='submit']",
@@ -172,7 +173,8 @@ class AstraBrowserSession:
                     locator.click(timeout=2000)
                     page.wait_for_load_state("domcontentloaded", timeout=10000)
                     return
-            except Exception:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001
+                LOGGER.debug("Could not click login selector %s: %s", selector, err)
                 continue
 
     def _capture_browser_session(self) -> None:
@@ -335,7 +337,7 @@ SESSION = AstraBrowserSession(CONFIG)
 class Handler(BaseHTTPRequestHandler):
     server_version = "AstraBrowserProxy/1.0"
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if not self._authorized():
             self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
             return
@@ -347,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         if not self._authorized():
             self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
             return
@@ -384,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if CONFIG.bind != "127.0.0.1" and not CONFIG.shared_token:
+        raise RuntimeError("Refusing to start unauthenticated proxy on non-loopback address. Set ASTRA_SHARED_TOKEN or bind to 127.0.0.1.")
     server = ThreadingHTTPServer((CONFIG.bind, CONFIG.port), Handler)
     LOGGER.info("Starting Astra browser proxy on %s:%s", CONFIG.bind, CONFIG.port)
     server.serve_forever()

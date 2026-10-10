@@ -1,6 +1,7 @@
 {
   "config": {
     "abort": {
+      "entry_not_found": "Der Astra-Energy-Konfigurationseintrag existiert nicht mehr",
       "reauth_successful": "Erneute Authentifizierung erfolgreich"
     },
     "error": {

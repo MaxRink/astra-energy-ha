@@ -22,7 +22,6 @@ from .const import (
     ATTR_RAW_METER_ID,
     ATTR_SOURCE,
     DOMAIN,
-    SENSOR_DISPLAY_NAMES,
     SENSOR_OBJECT_IDS,
 )
 from .coordinator import AstraEnergyCoordinator
@@ -46,24 +45,32 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
         translation_key="api_status",
         icon="mdi:api",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
     AstraCoordinatorSensorEntityDescription(
         key="last_successful_source",
         translation_key="last_successful_source",
         icon="mdi:import",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["api", "web", "browser_proxy", "none", "unknown"],
     ),
     AstraCoordinatorSensorEntityDescription(
         key="web_session_status",
         translation_key="web_session_status",
         icon="mdi:web",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
     AstraCoordinatorSensorEntityDescription(
         key="browser_proxy_status",
         translation_key="browser_proxy_status",
         icon="mdi:server-network",
         entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["ok", "error", "deferred", "invalid_auth", "disabled", "not_logged_in"],
     ),
 )
 
@@ -130,15 +137,6 @@ SENSOR_DESCRIPTIONS: tuple[AstraSensorEntityDescription, ...] = (
         value_attr="unsmoothed_total_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-    ),
-    AstraSensorEntityDescription(
-        key="exported_energy",
-        translation_key="exported_energy",
-        value_attr="exported_kwh_total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        entity_registry_enabled_default=False,
     ),
     AstraSensorEntityDescription(
         key="raw_grid_energy",
@@ -336,7 +334,7 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
     """Sensor backed by one Astra meter field."""
 
     entity_description: AstraSensorEntityDescription
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -348,18 +346,12 @@ class AstraEnergySensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEntity)
         self._meter_id = meter_id
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{meter_id}_{description.key}"
-        self._attr_name = SENSOR_DISPLAY_NAMES[description.key]
         self._attr_suggested_object_id = SENSOR_OBJECT_IDS[description.key]
 
     @property
     def reading(self) -> AstraMeterReading | None:
         """Return the latest reading for this sensor."""
         return self.coordinator.data.get(self._meter_id)
-
-    @property
-    def name(self) -> str | None:
-        """Return a friendly name."""
-        return SENSOR_DISPLAY_NAMES[self.entity_description.key]
 
     @property
     def available(self) -> bool:
@@ -439,7 +431,7 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
     """Sensor backed by coordinator status rather than one meter field."""
 
     entity_description: AstraCoordinatorSensorEntityDescription
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -450,13 +442,7 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
         self.entity_description = description
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{description.key}"
-        self._attr_name = SENSOR_DISPLAY_NAMES[description.key]
         self._attr_suggested_object_id = SENSOR_OBJECT_IDS[description.key]
-
-    @property
-    def name(self) -> str | None:
-        """Return a friendly name."""
-        return SENSOR_DISPLAY_NAMES[self.entity_description.key]
 
     @property
     def native_value(self):

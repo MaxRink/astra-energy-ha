@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
 """Probe Astra mobile API action names and summarize response schemas."""
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 import getpass
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 try:
     from tools.astra_mobile_probe import DEFAULT_URL, post_action, session_id
@@ -56,6 +56,7 @@ DEFAULT_ACTIONS = (
     "get_userdocs",
     "get_mtr_userdocs",
 )
+ASTRA_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
 
 def main() -> int:
@@ -65,7 +66,10 @@ def main() -> int:
     parser.add_argument("--username", default=getenv("ASTRA_USERNAME"))
     parser.add_argument("--password")
     parser.add_argument("--immo", default=getenv("ASTRA_IMMO", "-1"))
-    parser.add_argument("--year", default=getenv("ASTRA_YEAR", str(datetime.now().year)))
+    parser.add_argument(
+        "--year",
+        default=getenv("ASTRA_YEAR", str(datetime.now(ASTRA_TIME_ZONE).year)),
+    )
     parser.add_argument("--month", default=getenv("ASTRA_MONTH", "-1"))
     parser.add_argument("--date", default=getenv("ASTRA_DATE", "-1"))
     parser.add_argument("--medium", default=getenv("ASTRA_MEDIUM", "1"))

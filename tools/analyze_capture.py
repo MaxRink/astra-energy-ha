@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Summarize raw CDP JSONL captures into endpoint documentation."""
 
 from __future__ import annotations

@@ -1,19 +1,19 @@
-#!/usr/bin/env python3
 """Probe Astra's web report endpoints and export local analysis artifacts."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import dataclass
-from datetime import datetime
-from html import unescape
 import json
 import re
 import time
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime
+from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-import urllib.request
+from zoneinfo import ZoneInfo
 
 try:
     from tools.env_loader import getenv
@@ -35,6 +35,7 @@ PRICE_RE = re.compile(
     r"(?:preis|tarif|kosten|betrag|eur|€/kwh|ct/kwh|mwst)",
     re.IGNORECASE,
 )
+ASTRA_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
 
 @dataclass(frozen=True)
@@ -140,7 +141,9 @@ def parse_graph_points(html: str) -> list[Point]:
     """Parse cumulative and interval values from an Astra graph image map."""
     values_by_ts: dict[datetime, list[float]] = {}
     for raw_value, raw_ts in TITLE_RE.findall(html):
-        timestamp = datetime.strptime(raw_ts, "%d.%m.%Y %H:%M:%S")
+        timestamp = datetime.strptime(raw_ts, "%d.%m.%Y %H:%M:%S").replace(
+            tzinfo=ASTRA_TIME_ZONE
+        )
         values_by_ts.setdefault(timestamp, []).append(_parse_number(raw_value))
 
     points: list[Point] = []
@@ -376,7 +379,11 @@ def _parse_number(value: str) -> float:
 
 
 def _to_de_datetime(value: str) -> str:
-    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M:%S")
+    return (
+        datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        .replace(tzinfo=ASTRA_TIME_ZONE)
+        .strftime("%d.%m.%Y %H:%M:%S")
+    )
 
 
 def _redact_url(url: str) -> str:

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 import logging
 
-from homeassistant.config_entries import ConfigEntry
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigEntryAuthFailed
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
-import voluptuous as vol
 
 from .const import (
     CONF_ANOMALY_REDISTRIBUTION_WINDOW,
@@ -28,6 +27,7 @@ from .const import (
     CONF_SMOOTH_INTERVAL_ANOMALIES,
     CONF_SMOOTHING_LOOKAROUND_DAYS,
     DEFAULT_BACKFILL_DAYS,
+    DEFAULT_BASE_URL,
     DEFAULT_HISTORY_GRANULARITY,
     DEFAULT_IMPORT_STATISTICS,
     DEFAULT_POLL_INTERVAL,
@@ -50,7 +50,6 @@ AstraEnergyConfigEntry = ConfigEntry[AstraEnergyCoordinator]
 
 _LOGGER = logging.getLogger(__name__)
 
-_CONF_BACKFILL_DAYS_ALIASES = (CONF_BACKFILL_DAYS, "days")
 _LEGACY_DEFAULT_POLL_INTERVAL = 900
 
 _SERVICE_SCHEMA = vol.Schema(
@@ -84,17 +83,6 @@ _SERVICE_SCHEMA = vol.Schema(
     }
 )
 
-
-def _service_value(data: dict, keys: tuple[str, ...] | str, default):
-    """Return a service value with support for backwards-compatible aliases."""
-    if isinstance(keys, str):
-        keys = (keys,)
-    for key in keys:
-        if key in data:
-            return data[key]
-    return default
-
-
 def _normalize_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Move old default options to current safer defaults."""
     if entry.options.get(CONF_POLL_INTERVAL) != _LEGACY_DEFAULT_POLL_INTERVAL:
@@ -125,10 +113,9 @@ async def _async_backfill_history(
     response: dict[str, dict[str, int]] = {}
     for entry_id, coordinator in selected.items():
         entry = coordinator.config_entry
-        days = _service_value(
-            call.data,
-            _CONF_BACKFILL_DAYS_ALIASES,
-            entry.options.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+        days = call.data.get(
+            CONF_BACKFILL_DAYS,
+            call.data.get("days", entry.options.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS)),
         )
         import_statistics = call.data.get(
             CONF_IMPORT_STATISTICS,
@@ -158,16 +145,14 @@ async def _async_backfill_history(
     return response
 
 
-async def _async_background_backfill(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Run a backfill task in the background and let HA log unexpected failures."""
-    await _async_backfill_history(hass, call)
-
-
 async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator) -> None:
-    """Run the initial provider update without blocking config-entry setup."""
+    """Run an initial refresh task and turn authentication failures into reauth."""
     try:
         await coordinator.async_refresh()
-    except Exception:  # noqa: BLE001
+    except ConfigEntryAuthFailed as err:
+        coordinator.config_entry.async_start_reauth(coordinator.hass)
+        _LOGGER.warning("Astra Energy initial refresh requires reauthentication: %s", err)
+    except Exception:
         _LOGGER.exception("Astra Energy initial refresh failed")
 
 
@@ -195,7 +180,7 @@ async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> 
             ),
             import_statistics=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("Astra Energy scheduled backfill failed")
     finally:
         coordinator._scheduled_backfill_running = False
@@ -204,12 +189,19 @@ async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> 
 async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) -> bool:
     """Set up Astra Energy from a config entry."""
     _normalize_entry_options(hass, entry)
+    username = str(entry.data.get(CONF_USERNAME) or "").strip()
+    password = entry.data.get(CONF_PASSWORD)
+    if not username or not isinstance(password, str) or not password:
+        raise ConfigEntryAuthFailed(
+            "Astra credentials are missing; reauthenticate the integration"
+        )
+    base_url = str(entry.data.get(CONF_BASE_URL) or DEFAULT_BASE_URL).rstrip("/")
     coordinator = AstraEnergyCoordinator(
         hass=hass,
         entry=entry,
-        username=entry.data[CONF_USERNAME],
-        password=entry.data[CONF_PASSWORD],
-        base_url=entry.data[CONF_BASE_URL],
+        username=username,
+        password=password,
+        base_url=base_url,
         update_interval=timedelta(
             seconds=entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         ),
@@ -218,13 +210,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
     coordinator.data = coordinator.data or {}
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
+    await coordinator.async_config_entry_first_refresh()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    initial_refresh_task = hass.async_create_task(_async_background_initial_refresh(coordinator))
-
-    def _cancel_initial_refresh() -> None:
-        initial_refresh_task.cancel()
-
-    entry.async_on_unload(_cancel_initial_refresh)
 
     if entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS):
 
@@ -239,10 +227,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
         )
 
         async def _async_run_initial_backfill() -> None:
-            try:
-                await initial_refresh_task
-            except asyncio.CancelledError:
-                return
             await _async_run_configured_backfill(hass, entry.entry_id)
 
         initial_backfill_task = hass.async_create_task(_async_run_initial_backfill())
@@ -256,7 +240,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
 
         async def _async_handle_backfill(call: ServiceCall) -> dict[str, dict[str, int]]:
             if call.data.get(CONF_RUN_IN_BACKGROUND):
-                hass.async_create_task(_async_background_backfill(hass, call))
+                hass.async_create_task(_async_backfill_history(hass, call))
                 return {"started": {"entries": len(hass.data.get(DOMAIN, {}))}}
             return await _async_backfill_history(hass, call)
 

@@ -157,18 +157,6 @@ SENSOR_OBJECT_IDS = {
     "web_session_status": "astra_web_session_status",
     "browser_proxy_status": "astra_browser_proxy_status",
 }
-SENSOR_STATISTIC_LABELS = {
-    "imported_energy": "grid energy",
-    "solar_energy": "solar energy",
-    "total_energy": "total energy",
-    "unsmoothed_imported_energy": "unsmoothed grid energy",
-    "unsmoothed_solar_energy": "unsmoothed solar energy",
-    "unsmoothed_total_energy": "unsmoothed total energy",
-    "grid_energy_cost_total": "grid energy cost",
-    "solar_energy_cost_total": "solar energy cost",
-    "total_energy_cost_total": "total energy cost",
-}
-
 ISSUE_API_AUTH = "api_auth_failed"
 ISSUE_API_DEFERRED = "api_deferred"
 ISSUE_API_UNAVAILABLE = "api_unavailable"
@@ -176,5 +164,3 @@ ISSUE_BACKFILL_FAILED = "backfill_failed"
 ISSUE_WEB_SESSION = "web_session_failed"
 
 SERVICE_BACKFILL_HISTORY = "backfill_history"
-
-PLATFORMS = ["sensor"]
