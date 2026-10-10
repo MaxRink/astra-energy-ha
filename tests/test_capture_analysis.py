@@ -3576,6 +3576,22 @@ def test_last_successful_source_enum_covers_runtime_sources() -> None:
     assert {"mobile", "recorder", "browser_proxy"}.issubset(set(description.options))
 
 
+def test_diagnostic_status_enums_cover_fallback_states() -> None:
+    descriptions = {
+        description.key: description
+        for description in astra_sensor.COORDINATOR_SENSOR_DESCRIPTIONS
+    }
+    assert {"browser_proxy", "deferred", "invalid_auth"}.issubset(
+        set(descriptions["api_status"].options)
+    )
+    assert {"not_configured", "login_required", "invalid_response", "no_data"}.issubset(
+        set(descriptions["web_session_status"].options)
+    )
+    assert {"idle", "unauthorized", "rejected"}.issubset(
+        set(descriptions["browser_proxy_status"].options)
+    )
+
+
 def test_deferred_provider_total_sensors_remain_unavailable() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="meter",
