@@ -1328,6 +1328,11 @@ class AstraClient:
                 last_error = err
                 _LOGGER.debug("Astra mobile endpoint failed for action=%s url=%s: %s", action, url, err)
         if last_error is not None:
+            if isinstance(last_error, AstraDeferredDataError):
+                raise AstraDeferredDataError(
+                    f"Astra action {action} returned deferred data after "
+                    f"trying {len(self._base_urls)} endpoint(s): {last_error}"
+                ) from last_error
             raise last_error
         raise AstraApiError("No Astra mobile endpoints configured")
 
@@ -1357,7 +1362,17 @@ class AstraClient:
             raise AstraNetworkError(
                 f"Astra request failed: {type(err).__name__}: {_sanitize_error_text(err)}"
             ) from err
-        return _checksum_verified_body(text)
+        try:
+            return _checksum_verified_body(text)
+        except AstraDeferredDataError as err:
+            content_type = "unknown"
+            headers = getattr(response, "headers", None)
+            if headers:
+                content_type = str(headers.get("Content-Type") or "unknown").split(";", 1)[0]
+            raise AstraDeferredDataError(
+                f"{err}; http_status={response.status}; response_bytes={len(text)}; "
+                f"content_type={content_type}"
+            ) from err
 
     async def async_login(self) -> None:  # pragma: no cover
         """Authenticate through the Android JSON endpoint."""
