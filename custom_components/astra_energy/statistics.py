@@ -45,7 +45,7 @@ _LOGGER = logging.getLogger(__name__)
 
 RECORDER_SOURCE = "recorder"
 INTERVAL_CACHE_STORAGE_KEY = "astra_energy.interval_payload_cache"
-INTERVAL_CACHE_STORAGE_VERSION = 1
+INTERVAL_CACHE_STORAGE_VERSION = 2
 STATISTIC_IMPORT_BATCH_SIZE = 50
 
 @dataclass(frozen=True)
@@ -557,8 +557,9 @@ async def _async_interval_start_baseline(
 
 async def _async_interval_payload_cache(  # pragma: no cover
     hass: HomeAssistant,
+    namespace: str,
 ) -> dict[str, dict[str, Any]]:
-    """Load persisted quarter-hour payload cache."""
+    """Load one config entry's persisted quarter-hour payload cache."""
     try:
         from homeassistant.helpers.storage import Store
     except ImportError:
@@ -567,20 +568,30 @@ async def _async_interval_payload_cache(  # pragma: no cover
     data = await store.async_load() or {}
     if not isinstance(data, dict):
         return {}
-    return data
+    entries = data.get("entries")
+    if not isinstance(entries, dict):
+        return {}
+    cache = entries.get(namespace)
+    return cache if isinstance(cache, dict) else {}
 
 
 async def _async_save_interval_payload_cache(  # pragma: no cover
     hass: HomeAssistant,
+    namespace: str,
     cache: dict[str, dict[str, Any]],
 ) -> None:
-    """Persist quarter-hour payload cache."""
+    """Persist one config entry's quarter-hour payload cache."""
     try:
         from homeassistant.helpers.storage import Store
     except ImportError:
         return
     store = Store(hass, INTERVAL_CACHE_STORAGE_VERSION, INTERVAL_CACHE_STORAGE_KEY)
-    await store.async_save(cache)
+    data = await store.async_load() or {}
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, dict):
+        entries = {}
+    entries[namespace] = cache
+    await store.async_save({"entries": entries})
 
 
 async def async_backfill_statistics(  # pragma: no cover
@@ -608,6 +619,9 @@ async def async_backfill_statistics(  # pragma: no cover
         start_candidates.append(end - timedelta(hours=recent_refresh_hours))
     start = min(start_candidates)
     if history_granularity == HISTORY_GRANULARITY_QUARTER_HOUR:
+        cache_namespace = str(
+            getattr(coordinator.config_entry, "entry_id", "default")
+        )
         use_cache = (
             coordinator.config_entry.options.get(
                 CONF_CACHE_INTERVAL_PAYLOADS, DEFAULT_CACHE_INTERVAL_PAYLOADS
@@ -615,8 +629,10 @@ async def async_backfill_statistics(  # pragma: no cover
             if cache_interval_payloads is None
             else cache_interval_payloads
         )
-        payload_cache = await _async_interval_payload_cache(hass) if use_cache else {}
-        cache_size_before = len(payload_cache)
+        payload_cache = (
+            await _async_interval_payload_cache(hass, cache_namespace) if use_cache else {}
+        )
+        payload_cache_before = dict(payload_cache)
         cache_before = end - timedelta(hours=recent_refresh_hours) if use_cache else None
         start_baseline = await _async_interval_start_baseline(
             hass,
@@ -689,8 +705,8 @@ async def async_backfill_statistics(  # pragma: no cover
                 ),
             )
             return {}
-        if use_cache and len(payload_cache) != cache_size_before:
-            await _async_save_interval_payload_cache(hass, payload_cache)
+        if use_cache and payload_cache != payload_cache_before:
+            await _async_save_interval_payload_cache(hass, cache_namespace, payload_cache)
     else:
         history_granularity = HISTORY_GRANULARITY_MONTHLY
         try:

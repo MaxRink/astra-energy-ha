@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryAuthFailed
@@ -117,25 +117,23 @@ async def _async_backfill_history(
             CONF_BACKFILL_DAYS,
             call.data.get("days", entry.options.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS)),
         )
-        import_statistics = call.data.get(
-            CONF_IMPORT_STATISTICS,
-            entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
-        )
-        recent_refresh_hours = call.data.get(
-            CONF_RECENT_REFRESH_HOURS,
-            entry.options.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
-        )
-        history_granularity = call.data.get(
-            CONF_HISTORY_GRANULARITY,
-            entry.options.get(CONF_HISTORY_GRANULARITY, DEFAULT_HISTORY_GRANULARITY),
-        )
-        response[entry_id] = await async_backfill_statistics(
-            hass,
+        response[entry_id] = await _async_backfill_one(
             coordinator,
+            hass,
+            entry,
             days=days,
-            recent_refresh_hours=recent_refresh_hours,
-            history_granularity=history_granularity,
-            import_statistics=import_statistics,
+            recent_refresh_hours=call.data.get(
+                CONF_RECENT_REFRESH_HOURS,
+                entry.options.get(CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS),
+            ),
+            history_granularity=call.data.get(
+                CONF_HISTORY_GRANULARITY,
+                entry.options.get(CONF_HISTORY_GRANULARITY, DEFAULT_HISTORY_GRANULARITY),
+            ),
+            import_statistics=call.data.get(
+                CONF_IMPORT_STATISTICS,
+                entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS),
+            ),
             max_average_kw=call.data.get(CONF_MAX_INTERVAL_AVERAGE_KW),
             smooth_anomalies=call.data.get(CONF_SMOOTH_INTERVAL_ANOMALIES),
             redistribution_window=call.data.get(CONF_ANOMALY_REDISTRIBUTION_WINDOW),
@@ -143,6 +141,42 @@ async def _async_backfill_history(
             cache_interval_payloads=call.data.get(CONF_CACHE_INTERVAL_PAYLOADS),
         )
     return response
+
+
+async def _async_backfill_one(
+    coordinator: AstraEnergyCoordinator,
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    days: int,
+    recent_refresh_hours: int,
+    history_granularity: str,
+    import_statistics: bool,
+    max_average_kw: float | None = None,
+    smooth_anomalies: bool | None = None,
+    redistribution_window: int | None = None,
+    smoothing_lookaround_days: int | None = None,
+    cache_interval_payloads: bool | None = None,
+) -> dict[str, int]:
+    """Run one backfill at a time per Astra entry."""
+    lock = coordinator._backfill_lock
+    if lock.locked():
+        _LOGGER.debug("Skipping overlapping Astra backfill for entry %s", entry.entry_id)
+        return {"skipped_overlap": 1}
+    async with lock:
+        return await async_backfill_statistics(
+            hass,
+            coordinator,
+            days=days,
+            recent_refresh_hours=recent_refresh_hours,
+            history_granularity=history_granularity,
+            import_statistics=import_statistics,
+            max_average_kw=max_average_kw,
+            smooth_anomalies=smooth_anomalies,
+            redistribution_window=redistribution_window,
+            smoothing_lookaround_days=smoothing_lookaround_days,
+            cache_interval_payloads=cache_interval_payloads,
+        )
 
 
 async def _async_background_initial_refresh(coordinator: AstraEnergyCoordinator) -> None:
@@ -168,9 +202,10 @@ async def _async_run_configured_backfill(hass: HomeAssistant, entry_id: str) -> 
         return
     coordinator._scheduled_backfill_running = True
     try:
-        await async_backfill_statistics(
-            hass,
+        await _async_backfill_one(
             coordinator,
+            hass,
+            entry,
             days=entry.options.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
             recent_refresh_hours=entry.options.get(
                 CONF_RECENT_REFRESH_HOURS, DEFAULT_RECENT_REFRESH_HOURS

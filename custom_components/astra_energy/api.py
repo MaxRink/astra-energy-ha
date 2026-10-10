@@ -727,7 +727,7 @@ def _combined_reading_from_channels(channels: list[dict[str, Any]]) -> AstraMete
     grid_total = (
         max(total_kwh - solar_total, 0.0)
         if solar_total is not None
-        else raw_grid_total or total_kwh
+        else raw_grid_total if raw_grid_total is not None else total_kwh
     )
     return AstraMeterReading(
         meter_id=meter_id,
@@ -1497,17 +1497,35 @@ class AstraClient:
                 first = readings[0]
                 readings[0] = replace(
                     first,
-                    grid_kwh_total=balance_values.get("grid_kwh_total") or first.grid_kwh_total,
-                    solar_kwh_total=balance_values.get("solar_kwh_total") or first.solar_kwh_total,
-                    total_kwh=balance_values.get("total_kwh") or first.total_kwh,
+                    grid_kwh_total=(
+                        balance_values["grid_kwh_total"]
+                        if balance_values.get("grid_kwh_total") is not None
+                        else first.grid_kwh_total
+                    ),
+                    solar_kwh_total=(
+                        balance_values["solar_kwh_total"]
+                        if balance_values.get("solar_kwh_total") is not None
+                        else first.solar_kwh_total
+                    ),
+                    total_kwh=(
+                        balance_values["total_kwh"]
+                        if balance_values.get("total_kwh") is not None
+                        else first.total_kwh
+                    ),
                     unsmoothed_grid_kwh_total=(
-                        balance_values.get("grid_kwh_total") or first.unsmoothed_grid_kwh_total
+                        balance_values["grid_kwh_total"]
+                        if balance_values.get("grid_kwh_total") is not None
+                        else first.unsmoothed_grid_kwh_total
                     ),
                     unsmoothed_solar_kwh_total=(
-                        balance_values.get("solar_kwh_total") or first.unsmoothed_solar_kwh_total
+                        balance_values["solar_kwh_total"]
+                        if balance_values.get("solar_kwh_total") is not None
+                        else first.unsmoothed_solar_kwh_total
                     ),
                     unsmoothed_total_kwh=(
-                        balance_values.get("total_kwh") or first.unsmoothed_total_kwh
+                        balance_values["total_kwh"]
+                        if balance_values.get("total_kwh") is not None
+                        else first.unsmoothed_total_kwh
                     ),
                     raw={
                         **(first.raw or {}),
@@ -1725,9 +1743,10 @@ class AstraClient:
         payload_cache = payload_cache if payload_cache is not None else {}
         cache_hits = 0
         fetched = 0
+        cache_changed = False
 
         async def fetch_day(day: date) -> tuple[date, dict[str, Any], dict[str, int]]:
-            nonlocal cache_hits, fetched
+            nonlocal cache_changed, cache_hits, fetched
             cache_key = day.isoformat()
             if cache_before_date is not None and day < cache_before_date and cache_key in payload_cache:
                 cache_hits += 1
@@ -1740,6 +1759,8 @@ class AstraClient:
                         s_mnt=str(day.month),
                         s_datum=day.isoformat(),
                     )
+                except AstraAuthError:
+                    raise
                 except AstraApiError as err:
                     if cache_key in payload_cache:
                         cache_hits += 1
@@ -1756,7 +1777,9 @@ class AstraClient:
                     )
                     return day, {"data": []}, {"interval_fetch_failed": 1}
                 fetched += 1
-                payload_cache[cache_key] = data
+                if payload_cache.get(cache_key) != data:
+                    payload_cache[cache_key] = data
+                    cache_changed = True
                 return day, data, {}
 
         payloads = await asyncio.gather(*(fetch_day(day) for day in days))

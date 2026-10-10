@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -155,6 +156,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         }
         self._recorder_baselines_loaded = False
         self._last_mobile_success_at = None
+        self._backfill_lock = asyncio.Lock()
 
     async def _async_update_data(self) -> dict[str, AstraMeterReading]:
         """Fetch latest Astra data."""
