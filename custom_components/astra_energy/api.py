@@ -1353,8 +1353,18 @@ class AstraClient:
         self._anomaly_redistribution_window = int(anomaly_redistribution_window)
         self._smoothing_lookaround_days = int(smoothing_lookaround_days)
         self._request_timeout = DEFAULT_REQUEST_TIMEOUT
+        # The provider requires a fresh timestamp/checksum pair for every
+        # action.  Serialize the timestamp + action pair so overlapping HA
+        # refresh/backfill tasks cannot race the provider session or create a
+        # burst of concurrent requests against its slow API.
+        self._request_lock = asyncio.Lock()
 
     async def _post_action(self, action: str, **params: str) -> str:  # pragma: no cover
+        """POST one action while keeping provider requests single-flight."""
+        async with self._request_lock:
+            return await self._post_action_unlocked(action, **params)
+
+    async def _post_action_unlocked(self, action: str, **params: str) -> str:  # pragma: no cover
         """POST one Android API action and verify Astra's MD5 response suffix."""
         last_error: AstraApiError | None = None
         for url in self._base_urls:
