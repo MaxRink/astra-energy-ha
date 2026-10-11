@@ -4948,6 +4948,20 @@ def test_reporting_error_payload() -> None:
     assert "timestamp" in payload
 
 
+def test_reporting_deferred_payload_exposes_safe_transport_metadata() -> None:
+    error = astra_api.AstraDeferredDataError(
+        "Astra action get_mtr_akt returned deferred data after trying 2 endpoint(s): "
+        "Astra response is too short; http_status=200; response_bytes=0; content_type=html"
+    )
+    payload = reporting.error_payload(error)
+    assert payload["type"] == "AstraDeferredDataError"
+    assert payload["http_status"] == "200"
+    assert payload["response_bytes"] == "0"
+    assert payload["content_type"] == "html"
+    assert payload["endpoint_attempts"] == "2"
+    assert payload["deferred_reason"] == "empty_or_untrusted_payload"
+
+
 def test_reporting_count_summary() -> None:
     assert reporting.summarize_counts({"b": 2, "a": 1}) == "a: 1, b: 2"
     assert reporting.summarize_counts({}) == "no readings"
