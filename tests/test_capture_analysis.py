@@ -5103,7 +5103,7 @@ def test_browser_proxy_uses_long_but_bounded_timeout() -> None:
             )
         )
     assert session.calls[0][1]["timeout"] == browser_proxy.DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT
-    assert browser_proxy.DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT == 45
+    assert browser_proxy.DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT == 60
 
 
 def test_web_session_check_reports_valid_cookie_session() -> None:
