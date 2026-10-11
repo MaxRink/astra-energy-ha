@@ -2975,6 +2975,31 @@ def test_monthly_metrics_empty_and_pv_fallback() -> None:
     ) == {}
 
 
+def test_monthly_metrics_are_cached_for_slow_provider() -> None:
+    client = object.__new__(astra_api.AstraClient)
+    client._monthly_metrics_cache = {}
+    calls = 0
+
+    async def get_json(_action: str, **_params: str) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "data": [
+                {
+                    "_vb_ttl": "Gesamtbezug,Netzbezug",
+                    "_vb_vll": ",".join(["10.0"] * 12) + ";" + ",".join(["9.0"] * 12),
+                }
+            ]
+        }
+
+    client._get_json = get_json
+    first = asyncio.run(client._read_monthly_metrics())
+    second = asyncio.run(client._read_monthly_metrics())
+
+    assert first == second
+    assert calls == 1
+
+
 def test_interval_point_reading_uses_cumulative_totals() -> None:
     reading = astra_api._reading_from_interval_point(
         {
