@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
+from email.utils import parsedate_to_datetime
 from hashlib import md5
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -39,6 +41,33 @@ _SENSITIVE_TEXT_RE = re.compile(
     r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|"""
     r"""(?:Bearer|Basic|Token)\s+[^\s,;}']+|[^\s,;}]+)"""
 )
+
+_MAX_RETRY_AFTER_SECONDS = 300.0
+
+
+def _retry_after_seconds(response: Any) -> float | None:
+    """Parse a bounded Retry-After header without sleeping in the API client."""
+    headers = getattr(response, "headers", {})
+    value = None
+    for key, header_value in getattr(headers, "items", lambda: ())():
+        if str(key).lower() == "retry-after":
+            value = str(header_value).strip()
+            break
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            seconds = (retry_at - datetime.now(UTC)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return min(seconds, _MAX_RETRY_AFTER_SECONDS)
 
 
 def _sanitize_error_text(value: Any, secrets: tuple[str, ...] = ()) -> str:
@@ -75,6 +104,15 @@ class AstraNetworkError(AstraApiError):
 
 class AstraHttpError(AstraApiError):
     """Astra returned an unsuccessful HTTP status."""
+
+
+class AstraRateLimitError(AstraHttpError):
+    """Astra asked the client to retry a transient request later."""
+
+    def __init__(self, status: int, retry_after: float | None = None) -> None:
+        super().__init__(f"Astra HTTP {status}; retry later")
+        self.status = status
+        self.retry_after = retry_after
 
 
 class AstraProtocolError(AstraApiError):
@@ -1339,6 +1377,10 @@ class AstraClient:
             except AstraAuthError:
                 self._authenticated = False
                 raise
+            except AstraRateLimitError:
+                # Do not probe the remaining endpoint or amplify a provider
+                # rate limit.  The coordinator will schedule the next retry.
+                raise
             except AstraApiError as err:
                 last_error = err
                 _LOGGER.debug("Astra mobile endpoint failed for action=%s url=%s: %s", action, url, err)
@@ -1380,6 +1422,10 @@ class AstraClient:
                         self._authenticated = False
                         raise AstraSessionExpiredError(
                             f"Astra session rejected (HTTP {response.status})"
+                        )
+                    if response.status in {429, 503}:
+                        raise AstraRateLimitError(
+                            response.status, _retry_after_seconds(response)
                         )
                     raise AstraHttpError(f"Astra HTTP {response.status}")
         except AstraApiError:

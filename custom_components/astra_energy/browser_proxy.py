@@ -13,8 +13,8 @@ from .api import (
     _sanitize_error_text,
 )
 from .const import (
+    DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT,
     DEFAULT_GRID_PRICE_NET,
-    DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SOLAR_PRICE_NET,
     DEFAULT_TAX_RATE,
 )
@@ -52,7 +52,7 @@ async def async_fetch_browser_proxy_readings(
         async with session.get(
             endpoint,
             headers=headers,
-            timeout=DEFAULT_REQUEST_TIMEOUT,
+            timeout=DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT,
         ) as response:
             if response.status >= 400:
                 error_type = (
