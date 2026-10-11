@@ -1667,7 +1667,7 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
                 grid_kwh_total=4847.262,
                 solar_kwh_total=817.222,
                 total_kwh=5664.484,
-                raw={"source": "browser_proxy"},
+                raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
             )
         ]
 
@@ -1877,6 +1877,77 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     assert coordinator.api_status == "deferred"
     assert coordinator.last_successful_source == "recorder"
     assert coordinator.browser_proxy_status["status"] == "rejected"
+
+
+def test_coordinator_accepts_timestamped_browser_recovery_from_recorder_baseline(
+    monkeypatch,
+) -> None:
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response is too short")
+
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def create_issue(*_args, **_kwargs):
+        return None
+
+    async def proxy_readings(*_args, **_kwargs):
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="TEST_TOTAL_0",
+                meter_name="Astra Energy Meter",
+                timestamp=astra_coordinator.dt_util.utcnow(),
+                power_w=None,
+                imported_kwh_total=4849.144,
+                grid_kwh_total=4849.144,
+                solar_kwh_total=817.222,
+                total_kwh=5666.366,
+                raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+            )
+        ]
+
+    async def recorder_states(*_args, **_kwargs):
+        return {
+            "sensor.astra_grid_energy": 4704.49785211269,
+            "sensor.astra_solar_energy": 699.399147887309,
+            "sensor.astra_total_energy": 5403.897,
+        }
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+                astra_coordinator.CONF_MAX_INTERVAL_AVERAGE_KW: 50.0,
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(hours=1),
+    )
+    coordinator.client = Client()
+
+    async def web_status():
+        coordinator.web_session_status = {"status": "disabled"}
+
+    coordinator._async_update_web_session_status = web_status
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["TEST_TOTAL_0"].total_kwh == pytest.approx(5666.366)
+    assert coordinator.api_status == "browser_proxy"
+    assert coordinator.last_successful_source == "browser_proxy"
+    assert coordinator.browser_proxy_status["status"] == "ok"
 
 
 def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
@@ -2437,6 +2508,52 @@ def test_recorder_fallback_recovery_rejects_missing_source_or_foreign_meter() ->
     assert not astra_coordinator._is_recorder_fallback_recovery(
         foreign_meter, previous
     )
+
+
+def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> None:
+    now = astra_coordinator.dt_util.utcnow()
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_baseline"},
+    )
+
+    def reading(timestamp: dt.datetime) -> astra_api.AstraMeterReading:
+        return astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0",
+            meter_name="Strom VGB",
+            timestamp=timestamp,
+            power_w=None,
+            imported_kwh_total=6109.155,
+            grid_kwh_total=6109.155,
+            solar_kwh_total=1265.220088,
+            total_kwh=7374.375088,
+            raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+        )
+
+    assert astra_coordinator._is_recorder_fallback_recovery(
+        reading(now), previous
+    )
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        reading(now - dt.timedelta(days=14, minutes=1)), previous
+    )
+    assert not astra_coordinator._is_recorder_fallback_recovery(
+        reading(now + dt.timedelta(minutes=6)), previous
+    )
+    # An elapsed-hours value from a previous mobile success must not turn a
+    # stale recorder recovery into the large startup allowance.
+    assert astra_coordinator._live_jump_limit(
+        reading(now - dt.timedelta(days=14, minutes=1)),
+        previous,
+        max_average_kw=50.0,
+        elapsed_hours=100.0,
+    ) == 50.0
 
 
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
