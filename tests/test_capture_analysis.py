@@ -5065,6 +5065,24 @@ def test_browser_proxy_errors_redact_token_like_values() -> None:
         browser_proxy.parse_browser_proxy_payload({"ok": False, "error": "unauthorized"})
 
 
+def test_browser_proxy_uses_long_but_bounded_timeout() -> None:
+    class JsonResponse(FakeResponse):
+        async def json(self, **_kwargs):
+            return {"ok": False, "error": "unauthorized"}
+
+    session = FakeGetSession(response=JsonResponse("{}"))
+    with pytest.raises(browser_proxy.AstraBrowserProxyAuthError):
+        asyncio.run(
+            browser_proxy.async_fetch_browser_proxy_readings(
+                session,
+                url="http://proxy.example.test:43104",
+                token="dummy-token",
+            )
+        )
+    assert session.calls[0][1]["timeout"] == browser_proxy.DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT
+    assert browser_proxy.DEFAULT_BROWSER_PROXY_REQUEST_TIMEOUT == 45
+
+
 def test_web_session_check_reports_valid_cookie_session() -> None:
     html = (
         '<area TITLE="Gesamtbezug ist 100,50 kWh um 21.06.2026 12:15:00">'
