@@ -971,6 +971,21 @@ def test_interval_history_uses_cached_day_when_fetch_fails() -> None:
     assert [reading.total_kwh for reading in readings] == [100.25, 100.5]
 
 
+def test_interval_cache_ignores_unmigratable_home_assistant_store(monkeypatch) -> None:
+    class IncompatibleStore:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def async_load(self):
+            raise NotImplementedError
+
+    storage = types.ModuleType("homeassistant.helpers.storage")
+    storage.Store = IncompatibleStore
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers.storage", storage)
+
+    assert asyncio.run(statistics._async_interval_payload_cache(object(), "entry")) == {}
+
+
 def test_interval_history_propagates_auth_failures_instead_of_using_cache() -> None:
     client = astra_api.AstraClient(
         object(),
