@@ -22,6 +22,7 @@ from .api import (
     AstraMeterReading,
     AstraNetworkError,
     AstraProtocolError,
+    AstraRateLimitError,
     _cost_gross,
     _round_or_none,
     monotonic_reading,
@@ -233,6 +234,8 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                     f"{type(err).__name__}: {err}"
                 ),
             )
+            if isinstance(err, AstraRateLimitError) and err.retry_after is not None:
+                raise UpdateFailed(str(err), retry_after=err.retry_after) from err
             raise UpdateFailed(str(err)) from err
 
         now = dt_util.utcnow()

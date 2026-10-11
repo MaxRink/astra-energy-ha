@@ -4405,11 +4405,14 @@ class FakeResponse:
         text: str,
         status: int = 200,
         content_type: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self._text = text
         self._raw = text.encode("utf-8")
         self.status = status
-        self.headers = {"Content-Type": content_type} if content_type else {}
+        self.headers = dict(headers or {})
+        if content_type:
+            self.headers["Content-Type"] = content_type
 
     async def __aenter__(self):
         return self
@@ -4463,8 +4466,12 @@ class FakeGetSession:
         return self.response
 
 
-def _verified_response(body: str, status: int = 200) -> FakeResponse:
-    return FakeResponse(body + astra_api._md5(body), status=status)
+def _verified_response(
+    body: str,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+) -> FakeResponse:
+    return FakeResponse(body + astra_api._md5(body), status=status, headers=headers)
 
 
 def test_post_raw_at_url_wraps_unreachable_api() -> None:
@@ -4488,6 +4495,74 @@ def test_post_raw_at_url_reports_http_errors() -> None:
     )
 
     with pytest.raises(astra_api.AstraApiError, match="Astra HTTP 500"):
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_post_raw_at_url_preserves_bounded_retry_after(status: int) -> None:
+    client = astra_api.AstraClient(
+        FakeSession(
+            response=_verified_response(
+                "busy", status=status, headers={"Retry-After": "600"}
+            )
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(astra_api.AstraRateLimitError) as raised:
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+    assert raised.value.status == status
+    assert raised.value.retry_after == astra_api._MAX_RETRY_AFTER_SECONDS
+
+
+def test_retry_after_malformed_header_is_ignored() -> None:
+    response = _verified_response(
+        "busy", status=429, headers={"Retry-After": "later, maybe"}
+    )
+    client = astra_api.AstraClient(
+        FakeSession(response=response),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(astra_api.AstraRateLimitError) as raised:
+        asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
+    assert raised.value.retry_after is None
+
+
+def test_rate_limit_does_not_probe_the_next_mobile_endpoint() -> None:
+    first_url = "https://limited.example.test/csandroid.php"
+    second_url = "https://other.example.test/csios.php"
+    session = EndpointSession(
+        {
+            first_url: [_verified_response("busy", status=429, headers={"Retry-After": "2"})],
+            second_url: [_verified_response("12345")],
+        }
+    )
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="secret",
+        base_url=f"{first_url},{second_url}",
+    )
+
+    with pytest.raises(astra_api.AstraRateLimitError):
+        asyncio.run(client._post_action("auth_login", s_sid="sid"))
+    assert session.calls == [first_url]
+
+
+def test_rate_limit_request_cancellation_is_not_swallowed() -> None:
+    client = astra_api.AstraClient(
+        FakeSession(error=asyncio.CancelledError()),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
         asyncio.run(client._post_raw_at_url("https://example.test", {"s_action": "get_ts"}))
 
 
