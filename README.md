@@ -147,7 +147,10 @@ quarter-hour values, and object/grid split controls. Details are documented in
 
 ### HACS Installation
 
-This repository is HACS-compatible as a custom integration. For the private
+This repository is HACS-compatible as a custom integration. The current
+published revision is `v0.1.0-alpha.52`; it serializes provider requests per
+client so refresh and backfill work cannot create concurrent Astra API bursts.
+For the private
 repository, make sure HACS has GitHub access to `MaxRink/astra-energy-ha`, then
 add it as a custom repository:
 
