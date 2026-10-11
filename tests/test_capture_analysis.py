@@ -4533,6 +4533,29 @@ def test_retry_after_malformed_header_is_ignored() -> None:
     assert raised.value.retry_after is None
 
 
+def test_retry_after_date_and_invalid_numeric_values(monkeypatch) -> None:
+    class FixedDateTime(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 20, 12, 0, tzinfo=tz)
+
+    monkeypatch.setattr(astra_api, "datetime", FixedDateTime)
+    monkeypatch.setattr(
+        astra_api,
+        "parsedate_to_datetime",
+        lambda _value: FixedDateTime(2026, 6, 20, 12, 0, 2),
+    )
+    assert astra_api._retry_after_seconds(
+        types.SimpleNamespace(headers={"Retry-After": "date"})
+    ) == 2
+    assert astra_api._retry_after_seconds(
+        types.SimpleNamespace(headers={"Retry-After": "-1"})
+    ) is None
+    assert astra_api._retry_after_seconds(
+        types.SimpleNamespace(headers={"Retry-After": "NaN"})
+    ) is None
+
+
 def test_rate_limit_does_not_probe_the_next_mobile_endpoint() -> None:
     first_url = "https://limited.example.test/csandroid.php"
     second_url = "https://other.example.test/csios.php"
