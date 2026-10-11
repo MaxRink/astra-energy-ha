@@ -83,6 +83,8 @@ _BASELINE_COST_STATISTIC_ATTRS = {
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 _MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
+_MAX_TIMESTAMPED_RECOVERY_AGE = timedelta(days=14)
+_MAX_TIMESTAMPED_RECOVERY_FUTURE_SKEW = timedelta(minutes=5)
 
 
 def _api_status_for_error(err: AstraApiError) -> str:
@@ -689,10 +691,24 @@ def _live_jump_limit(
     elapsed_hours: float | None,
 ) -> float:
     """Return the maximum cumulative delta that may be published."""
-    if elapsed_hours is not None:
-        return max_average_kw * max(elapsed_hours, 0.25)
+    # A timestamped, source-authenticated recovery is allowed the larger
+    # startup window even when a previous mobile success timestamp exists.
+    # Conversely, stale or future-dated recovery data must not use that
+    # elapsed-hours window to bypass the recovery freshness checks below.
     if _is_recorder_fallback_recovery(reading, previous):
         return _MAX_STARTUP_BASELINE_HOLD_KWH
+    if (
+        previous.raw
+        and previous.raw.get("source") in {"recorder_fallback", "recorder_baseline"}
+        and reading.raw
+        and reading.raw.get("source") == "browser_proxy"
+    ):
+        # A browser recovery candidate that failed the freshness/source checks
+        # stays on the conservative repair allowance; elapsed-hours metadata
+        # must not turn it into an unrestricted startup jump.
+        return _MAX_STARTUP_BASELINE_REPAIR_KWH
+    if elapsed_hours is not None:
+        return max_average_kw * max(elapsed_hours, 0.25)
     return _MAX_STARTUP_BASELINE_REPAIR_KWH
 
 
@@ -708,13 +724,22 @@ def _is_recorder_fallback_recovery(
     """
     if reading.timestamp is None:
         return False
+    if reading.raw and reading.raw.get("source") == "browser_proxy":
+        age = dt_util.utcnow() - reading.timestamp
+        if age > _MAX_TIMESTAMPED_RECOVERY_AGE or age < -_MAX_TIMESTAMPED_RECOVERY_FUTURE_SKEW:
+            return False
     if (
         not previous.raw
-        or previous.raw.get("source") != "recorder_fallback"
+        or previous.raw.get("source")
+        not in {"recorder_fallback", "recorder_baseline"}
         or reading.meter_id != previous.meter_id
     ):
         return False
-    if reading.raw and reading.raw.get("source") == "browser_proxy":
+    if (
+        reading.raw
+        and reading.raw.get("source") == "browser_proxy"
+        and reading.raw.get("proxy_source") != "astra_web_widget"
+    ):
         return False
     if reading.total_kwh is None:
         return False
