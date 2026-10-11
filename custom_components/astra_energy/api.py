@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_GRID_PRICE_NET,
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_MOBILE_BASE_URLS,
+    DEFAULT_MONTHLY_METRICS_CACHE_HOURS,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
@@ -1353,6 +1354,13 @@ class AstraClient:
         self._anomaly_redistribution_window = int(anomaly_redistribution_window)
         self._smoothing_lookaround_days = int(smoothing_lookaround_days)
         self._request_timeout = DEFAULT_REQUEST_TIMEOUT
+        # The monthly endpoint is slow and its values only change at the
+        # provider's monthly aggregation cadence.  Keep a short-lived cache
+        # so the normal hourly refresh does not issue the same request every
+        # time.  A month change always invalidates the entry.
+        self._monthly_metrics_cache: dict[
+            tuple[int, int], tuple[datetime, dict[str, float]]
+        ] = {}
         # The provider requires a fresh timestamp/checksum pair for every
         # action.  Serialize the timestamp + action pair so overlapping HA
         # refresh/backfill tasks cannot race the provider session or create a
@@ -2031,7 +2039,14 @@ class AstraClient:
 
     async def _read_monthly_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-month medium metrics from Astra."""
-        today = datetime.now(ASTRA_TIME_ZONE).date()
+        now = datetime.now(ASTRA_TIME_ZONE)
+        today = now.date()
+        cache_key = (today.year, today.month)
+        cached = self._monthly_metrics_cache.get(cache_key)
+        if cached is not None:
+            fetched_at, values = cached
+            if now - fetched_at < timedelta(hours=DEFAULT_MONTHLY_METRICS_CACHE_HOURS):
+                return dict(values)
         try:
             data = await self._get_json(
                 "get_mtr_vbmed",
@@ -2041,7 +2056,10 @@ class AstraClient:
             )
         except AstraApiError:
             return {}
-        return _monthly_metrics_from_payload(data, today.month - 1)
+        values = _monthly_metrics_from_payload(data, today.month - 1)
+        if values:
+            self._monthly_metrics_cache = {cache_key: (now, dict(values))}
+        return values
 
     async def _read_overview_values(self) -> list[AstraMeterReading]:  # pragma: no cover
         """Fallback to tenant overview values when no meter stand is exposed."""
