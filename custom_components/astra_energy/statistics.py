@@ -565,7 +565,14 @@ async def _async_interval_payload_cache(  # pragma: no cover
     except ImportError:
         return {}
     store = Store(hass, INTERVAL_CACHE_STORAGE_VERSION, INTERVAL_CACHE_STORAGE_KEY)
-    data = await store.async_load() or {}
+    try:
+        data = await store.async_load() or {}
+    except NotImplementedError:
+        # Home Assistant cannot migrate a cache written by an older version
+        # when no migration callback was registered. Treat it as a cold cache;
+        # the provider history remains authoritative and will be repopulated.
+        _LOGGER.warning("Ignoring incompatible Astra interval payload cache")
+        return {}
     if not isinstance(data, dict):
         return {}
     entries = data.get("entries")
@@ -586,7 +593,11 @@ async def _async_save_interval_payload_cache(  # pragma: no cover
     except ImportError:
         return
     store = Store(hass, INTERVAL_CACHE_STORAGE_VERSION, INTERVAL_CACHE_STORAGE_KEY)
-    data = await store.async_load() or {}
+    try:
+        data = await store.async_load() or {}
+    except NotImplementedError:
+        _LOGGER.warning("Replacing incompatible Astra interval payload cache")
+        data = {}
     entries = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(entries, dict):
         entries = {}
