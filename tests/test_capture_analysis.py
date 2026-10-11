@@ -5328,3 +5328,45 @@ def test_interval_start_baseline_derives_grid_from_total_and_solar(monkeypatch) 
 
 def test_interval_start_baseline_is_none_without_recorder_states(monkeypatch) -> None:
     assert _interval_baseline_with_states(monkeypatch, {}) is None
+
+
+def test_post_action_serializes_timestamp_and_action_pairs() -> None:
+    """Concurrent callers must not overlap provider requests."""
+
+    class SlowSession:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        def post(self, _url, **_kwargs):
+            session = self
+
+            class Response(FakeResponse):
+                async def __aenter__(self):
+                    session.active += 1
+                    session.max_active = max(session.max_active, session.active)
+                    await asyncio.sleep(0)
+                    return self
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    session.active -= 1
+                    return await super().__aexit__(exc_type, exc, tb)
+
+            return Response(_verified_response("123")._text)
+
+    session = SlowSession()
+    client = astra_api.AstraClient(
+        session,
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    async def run_pair() -> None:
+        await asyncio.gather(
+            client._post_action("first", value="1"),
+            client._post_action("second", value="2"),
+        )
+
+    asyncio.run(run_pair())
+    assert session.max_active == 1
