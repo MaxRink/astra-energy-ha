@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -19,11 +20,27 @@ def utcnow_iso() -> str:
 
 def error_payload(err: Exception) -> dict[str, str]:
     """Return a redaction-safe error payload for diagnostics."""
-    return {
+    payload = {
         "type": type(err).__name__,
         "message": str(err),
         "timestamp": utcnow_iso(),
     }
+    # Keep transport metadata structured so dashboards do not need to parse
+    # free-form error text.  Values are allowlisted numeric/content labels;
+    # the original message remains sanitized by the API layer.
+    message = str(err)
+    for pattern, key in (
+        (r"http_status=(\d{3})", "http_status"),
+        (r"response_bytes=(\d+)", "response_bytes"),
+        (r"content_type=([a-z]+)", "content_type"),
+        (r"trying (\d+) endpoint\(s\)", "endpoint_attempts"),
+    ):
+        match = re.search(pattern, message)
+        if match:
+            payload[key] = match.group(1)
+    if type(err).__name__ == "AstraDeferredDataError":
+        payload["deferred_reason"] = "empty_or_untrusted_payload"
+    return payload
 
 
 async def async_create_issue(  # pragma: no cover
