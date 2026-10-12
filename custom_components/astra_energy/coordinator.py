@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntryAuthFailed
 from homeassistant.core import HomeAssistant
@@ -759,13 +759,18 @@ def _live_jump_limit(
     if _is_recorder_fallback_recovery(reading, previous):
         return _MAX_STARTUP_BASELINE_HOLD_KWH
     if reading.raw and reading.raw.get("source") == "browser_proxy":
-        # The widget's stand timestamp is a provider update marker, not proof
-        # that the counter advanced continuously since the previous poll.
-        # Never turn a stale midnight cache into hundreds of kWh of live use.
-        return min(
-            _MAX_BROWSER_PROXY_LIVE_JUMP_KWH,
-            max_average_kw * max(elapsed_hours or 0.25, 0.25),
-        )
+        # A provider stand timestamp can describe a whole day while the local
+        # poll only covered one interval. Require the proxy fetch timestamps to
+        # corroborate that elapsed time before allowing a large catch-up.
+        source_elapsed_hours = _browser_proxy_elapsed_hours(reading, previous)
+        if source_elapsed_hours is None:
+            return min(
+                _MAX_BROWSER_PROXY_LIVE_JUMP_KWH,
+                max_average_kw * max(elapsed_hours or 0.25, 0.25),
+            )
+        if elapsed_hours is not None and elapsed_hours > source_elapsed_hours * 2:
+            return _MAX_BROWSER_PROXY_LIVE_JUMP_KWH
+        return max_average_kw * max(source_elapsed_hours, 0.25)
     if (
         previous.raw
         and previous.raw.get("source") in {"recorder_fallback", "recorder_baseline"}
@@ -816,6 +821,27 @@ def _is_recorder_fallback_recovery(
     return source_sum is not None and abs(
         source_sum - reading.total_kwh
     ) <= _MAX_STARTUP_BASELINE_REPAIR_KWH
+
+
+def _browser_proxy_elapsed_hours(
+    reading: AstraMeterReading, previous: AstraMeterReading | None
+) -> float | None:
+    """Return elapsed local proxy fetch time when both values carry it."""
+    if previous is None or not reading.raw or not previous.raw:
+        return None
+    if reading.raw.get("source") != "browser_proxy" or previous.raw.get("source") != "browser_proxy":
+        return None
+    try:
+        current = datetime.fromisoformat(str(reading.raw["fetched_at"]))
+        prior = datetime.fromisoformat(str(previous.raw["fetched_at"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    if prior.tzinfo is None:
+        prior = prior.replace(tzinfo=UTC)
+    elapsed = (current - prior).total_seconds() / 3600
+    return elapsed if elapsed > 0 else None
 
 
 def _source_sum(reading: AstraMeterReading) -> float | None:

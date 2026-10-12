@@ -2641,7 +2641,7 @@ def test_browser_proxy_live_jump_is_capped_even_with_stale_provider_timestamp() 
         grid_kwh_total=6100.0,
         solar_kwh_total=1300.0,
         total_kwh=7400.0,
-        raw={"source": "browser_proxy"},
+        raw={"source": "browser_proxy", "fetched_at": "2026-10-12T00:00:00+00:00"},
     )
     reading = astra_api.AstraMeterReading(
         meter_id="TEST_TOTAL_0",
@@ -2652,12 +2652,45 @@ def test_browser_proxy_live_jump_is_capped_even_with_stale_provider_timestamp() 
         grid_kwh_total=6426.0,
         solar_kwh_total=1400.0,
         total_kwh=7826.0,
-        raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+        raw={
+            "source": "browser_proxy",
+            "proxy_source": "astra_web_widget",
+            "fetched_at": "2026-10-12T01:00:00+00:00",
+        },
     )
 
     assert astra_coordinator._live_jump_limit(
         reading, previous, max_average_kw=50.0, elapsed_hours=9.0
     ) == 50.0
+
+
+def test_browser_proxy_allows_corroborated_long_gap_catchup() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 9, 1, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6100.0,
+        grid_kwh_total=6100.0,
+        solar_kwh_total=1300.0,
+        total_kwh=7400.0,
+        raw={"source": "browser_proxy", "fetched_at": "2026-09-01T00:00:00+00:00"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 9, 15, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6426.0,
+        grid_kwh_total=6426.0,
+        solar_kwh_total=1400.0,
+        total_kwh=7826.0,
+        raw={"source": "browser_proxy", "fetched_at": "2026-09-15T00:00:00+00:00"},
+    )
+
+    assert astra_coordinator._live_jump_limit(
+        reading, previous, max_average_kw=50.0, elapsed_hours=336.0
+    ) == pytest.approx(16800.0)
 
 
 def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> None:
