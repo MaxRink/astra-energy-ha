@@ -83,6 +83,7 @@ _BASELINE_COST_STATISTIC_ATTRS = {
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 _MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
+_MAX_BROWSER_PROXY_LIVE_JUMP_KWH = 50.0
 _MAX_TIMESTAMPED_RECOVERY_AGE = timedelta(days=14)
 _MAX_TIMESTAMPED_RECOVERY_FUTURE_SKEW = timedelta(minutes=5)
 _DEFERRED_BACKOFF_BASE = timedelta(minutes=5)
@@ -757,6 +758,14 @@ def _live_jump_limit(
     # elapsed-hours window to bypass the recovery freshness checks below.
     if _is_recorder_fallback_recovery(reading, previous):
         return _MAX_STARTUP_BASELINE_HOLD_KWH
+    if reading.raw and reading.raw.get("source") == "browser_proxy":
+        # The widget's stand timestamp is a provider update marker, not proof
+        # that the counter advanced continuously since the previous poll.
+        # Never turn a stale midnight cache into hundreds of kWh of live use.
+        return min(
+            _MAX_BROWSER_PROXY_LIVE_JUMP_KWH,
+            max_average_kw * max(elapsed_hours or 0.25, 0.25),
+        )
     if (
         previous.raw
         and previous.raw.get("source") in {"recorder_fallback", "recorder_baseline"}

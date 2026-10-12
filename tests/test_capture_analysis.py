@@ -2631,6 +2631,35 @@ def test_recorder_fallback_recovery_rejects_missing_source_or_foreign_meter() ->
     )
 
 
+def test_browser_proxy_live_jump_is_capped_even_with_stale_provider_timestamp() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 10, 11, 23, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6100.0,
+        grid_kwh_total=6100.0,
+        solar_kwh_total=1300.0,
+        total_kwh=7400.0,
+        raw={"source": "browser_proxy"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 10, 12, 8, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6426.0,
+        grid_kwh_total=6426.0,
+        solar_kwh_total=1400.0,
+        total_kwh=7826.0,
+        raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+    )
+
+    assert astra_coordinator._live_jump_limit(
+        reading, previous, max_average_kw=50.0, elapsed_hours=9.0
+    ) == 50.0
+
+
 def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> None:
     now = astra_coordinator.dt_util.utcnow()
     previous = astra_api.AstraMeterReading(
