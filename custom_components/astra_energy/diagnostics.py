@@ -34,7 +34,15 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         "last_update_success": coordinator.last_update_success,
         "last_error": coordinator.last_error,
         "api_status": coordinator.api_status,
+        "response_class": coordinator.response_class,
         "last_successful_source": coordinator.last_successful_source,
+        "last_successful_at": coordinator.last_successful_at.isoformat()
+        if coordinator.last_successful_at
+        else None,
+        "deferred_failures": coordinator._deferred_failures,
+        "deferred_backoff_until": coordinator._deferred_backoff_until.isoformat()
+        if coordinator._deferred_backoff_until
+        else None,
         "web_session_status": coordinator.web_session_status,
         "browser_proxy_status": coordinator.browser_proxy_status,
         "meters": [

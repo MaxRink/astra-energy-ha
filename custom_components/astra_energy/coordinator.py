@@ -85,6 +85,8 @@ _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 _MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
 _MAX_TIMESTAMPED_RECOVERY_AGE = timedelta(days=14)
 _MAX_TIMESTAMPED_RECOVERY_FUTURE_SKEW = timedelta(minutes=5)
+_DEFERRED_BACKOFF_BASE = timedelta(minutes=5)
+_DEFERRED_BACKOFF_MAX = timedelta(hours=1)
 
 
 def _api_status_for_error(err: AstraApiError) -> str:
@@ -94,6 +96,28 @@ def _api_status_for_error(err: AstraApiError) -> str:
     if isinstance(err, AstraProtocolError):
         return "protocol_error"
     return "error"
+
+
+def _response_class_for_error(err: AstraApiError) -> str:
+    """Classify a provider failure without retaining provider response text."""
+    if isinstance(err, AstraRateLimitError):
+        return "rate_limited"
+    if isinstance(err, AstraNetworkError):
+        return "network_error"
+    if isinstance(err, AstraDeferredDataError):
+        text = str(err).lower()
+        if "response_bytes=0" in text or "content_type=html" in text:
+            return "empty_html"
+        return "deferred_protocol"
+    if isinstance(err, AstraProtocolError):
+        return "protocol_error"
+    return "http_error"
+
+
+def _deferred_backoff_delay(failures: int) -> timedelta:
+    """Return the bounded delay after a deferred provider response."""
+    exponent = max(0, min(failures - 1, 4))
+    return min(_DEFERRED_BACKOFF_MAX, _DEFERRED_BACKOFF_BASE * (2**exponent))
 
 
 class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]):
@@ -142,6 +166,10 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         self.last_error: dict[str, str] | None = None
         self.api_status = "unknown"
         self.last_successful_source: str | None = None
+        self.last_successful_at: datetime | None = None
+        self.response_class = "unknown"
+        self._deferred_failures = 0
+        self._deferred_backoff_until: datetime | None = None
         self.web_session_status: dict[str, str | int | None] = {
             "status": "disabled",
             "checked_at": None,
@@ -163,10 +191,15 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
 
     async def _async_update_data(self) -> dict[str, AstraMeterReading]:
         """Fetch latest Astra data."""
+        now = dt_util.utcnow()
+        if self._deferred_backoff_until and now < self._deferred_backoff_until:
+            self.api_status = "deferred"
+            return self.data or {}
         try:
             readings = await self.client.async_get_meters()
         except AstraAuthError as err:
             self.api_status = "invalid_auth"
+            self.response_class = "auth_error"
             self.last_error = error_payload(err)
             await async_create_issue(
                 self.hass,
@@ -182,6 +215,11 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             raise ConfigEntryAuthFailed(str(err)) from err
         except AstraDeferredDataError as err:
             self.api_status = "deferred"
+            self.response_class = _response_class_for_error(err)
+            self._deferred_failures += 1
+            self._deferred_backoff_until = now + _deferred_backoff_delay(
+                self._deferred_failures
+            )
             self.last_error = error_payload(err)
             await self._async_update_web_session_status()
             browser_proxy_readings = await self._async_browser_proxy_fallback_readings()
@@ -222,6 +260,7 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             return await self._async_recorder_fallback_readings()
         except AstraApiError as err:
             self.api_status = _api_status_for_error(err)
+            self.response_class = _response_class_for_error(err)
             self.last_error = error_payload(err)
             await self._async_update_web_session_status()
             await async_create_issue(
@@ -287,7 +326,11 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
 
         self.api_status = "ok"
+        self.response_class = "json"
         self.last_successful_source = "mobile"
+        self.last_successful_at = now
+        self._deferred_failures = 0
+        self._deferred_backoff_until = None
         self.last_error = None
         self._last_mobile_success_at = now
         await self._async_update_web_session_status()
@@ -447,7 +490,11 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
 
         self.api_status = "browser_proxy"
+        self.response_class = "browser_proxy"
         self.last_successful_source = "browser_proxy"
+        self.last_successful_at = now
+        self._deferred_failures = 0
+        self._deferred_backoff_until = None
         self.last_error = None
         self._set_browser_proxy_status(
             "ok", url=url, reading_count=len(normalized_readings)

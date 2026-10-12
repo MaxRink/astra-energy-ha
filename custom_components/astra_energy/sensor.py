@@ -109,6 +109,22 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
             "rejected",
         ],
     ),
+    AstraCoordinatorSensorEntityDescription(
+        key="last_successful_age",
+        translation_key="last_successful_age",
+        icon="mdi:clock-check-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        native_unit_of_measurement="s",
+        suggested_display_precision=0,
+    ),
+    AstraCoordinatorSensorEntityDescription(
+        key="response_class",
+        translation_key="response_class",
+        icon="mdi:message-processing-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["unknown", "json", "empty_html", "deferred_protocol", "rate_limited", "network_error", "auth_error", "protocol_error", "http_error", "browser_proxy"],
+    ),
 )
 
 _DEFERRED_UNAVAILABLE_STATE_CLASSES = {
@@ -497,6 +513,13 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
             return self.coordinator.web_session_status.get("status")
         if self.entity_description.key == "browser_proxy_status":
             return self.coordinator.browser_proxy_status.get("status")
+        if self.entity_description.key == "last_successful_age":
+            if self.coordinator.last_successful_at is None:
+                return None
+            from homeassistant.util import dt as dt_util
+            return max(0, (dt_util.utcnow() - self.coordinator.last_successful_at).total_seconds())
+        if self.entity_description.key == "response_class":
+            return self.coordinator.response_class
         return None
 
     @property
@@ -510,6 +533,11 @@ class AstraCoordinatorSensor(CoordinatorEntity[AstraEnergyCoordinator], SensorEn
             attributes.update(self.coordinator.web_session_status)
         if self.entity_description.key == "browser_proxy_status":
             attributes.update(self.coordinator.browser_proxy_status)
+        if self.entity_description.key == "last_successful_age":
+            attributes["last_successful_at"] = self.coordinator.last_successful_at.isoformat() if self.coordinator.last_successful_at else None
+            attributes["deferred_backoff_until"] = self.coordinator._deferred_backoff_until.isoformat() if self.coordinator._deferred_backoff_until else None
+        if self.entity_description.key == "response_class":
+            attributes["deferred_failures"] = self.coordinator._deferred_failures
         return attributes
 
     @property
