@@ -1759,6 +1759,77 @@ def test_coordinator_deferred_update_uses_browser_proxy_fallback(monkeypatch) ->
     assert [call[0] for call in calls] == ["delete", "delete", "delete"]
 
 
+def test_coordinator_browser_proxy_does_not_replace_newer_live_cumulative_state(
+    monkeypatch,
+) -> None:
+    """A cached browser stand must not create a reset/spike in HA history."""
+    class Client:
+        async def async_get_meters(self):
+            raise astra_api.AstraDeferredDataError("Astra response checksum mismatch")
+
+    async def proxy_readings(*_args, **_kwargs):
+        return [
+            astra_api.AstraMeterReading(
+                meter_id="TEST_TOTAL_0",
+                meter_name="Astra Energy Meter",
+                timestamp=dt.datetime(2026, 6, 27, 15, 45, tzinfo=dt.UTC),
+                power_w=None,
+                imported_kwh_total=90.0,
+                grid_kwh_total=90.0,
+                solar_kwh_total=10.0,
+                total_kwh=100.0,
+                raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+            )
+        ]
+
+    monkeypatch.setattr(astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings)
+    async def delete_issue(*_args, **_kwargs):
+        return None
+
+    async def create_issue(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(astra_coordinator, "async_delete_issue", delete_issue)
+    monkeypatch.setattr(astra_coordinator, "async_create_issue", create_issue)
+    async def recorder_states(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr(astra_coordinator, "_async_recorder_baseline_states", recorder_states)
+
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+    coordinator.client = Client()
+    coordinator.data = {
+        "TEST_TOTAL_0": astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0",
+            meter_name="Astra Energy Meter",
+            timestamp=dt.datetime(2026, 6, 27, 16, 0, tzinfo=dt.UTC),
+            power_w=None,
+            imported_kwh_total=120.0,
+            grid_kwh_total=120.0,
+            solar_kwh_total=20.0,
+            total_kwh=140.0,
+        )
+    }
+    coordinator._async_update_web_session_status = lambda: asyncio.sleep(0)
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["TEST_TOTAL_0"].grid_kwh_total == 120.0
+    assert result["TEST_TOTAL_0"].total_kwh == 140.0
+
+
 def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     monkeypatch,
 ) -> None:

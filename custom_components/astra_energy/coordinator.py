@@ -224,6 +224,19 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             await self._async_update_web_session_status()
             browser_proxy_readings = await self._async_browser_proxy_fallback_readings()
             if browser_proxy_readings:
+                # The browser widget can legitimately lag the mobile endpoint
+                # (and can return a cached meter stand after a reconnect). Do
+                # not publish that older cumulative value over a newer live
+                # reading: HA's total_increasing statistics would record a
+                # reset followed by a false consumption spike.
+                if self.data:
+                    browser_proxy_readings = {
+                        meter_id: monotonic_reading(
+                            reading,
+                            self.data.get(meter_id),
+                        )
+                        for meter_id, reading in browser_proxy_readings.items()
+                    }
                 await async_delete_issue(self.hass, ISSUE_API_AUTH)
                 await async_delete_issue(self.hass, ISSUE_API_DEFERRED)
                 await async_delete_issue(self.hass, ISSUE_API_UNAVAILABLE)
