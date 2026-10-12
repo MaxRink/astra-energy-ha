@@ -314,6 +314,12 @@
       },
       "browser_proxy_status": {
         "name": "Browser-Proxy-Status"
+      },
+      "last_successful_age": {
+        "name": "Alter der letzten erfolgreichen Aktualisierung"
+      },
+      "response_class": {
+        "name": "Klasse der letzten Antwort"
       }
     }
   }

@@ -176,6 +176,49 @@ sensor_spec.loader.exec_module(astra_sensor)
 astra_coordinator = sys.modules["custom_components.astra_energy.coordinator"]
 
 
+def test_deferred_error_classification_is_sanitized() -> None:
+    err = astra_api.AstraDeferredDataError(
+        "Astra response is too short; http_status=200; response_bytes=0; content_type=html"
+    )
+    assert astra_coordinator._response_class_for_error(err) == "empty_html"
+    assert astra_coordinator._response_class_for_error(
+        astra_api.AstraNetworkError("connection timeout")
+    ) == "network_error"
+    assert astra_coordinator._response_class_for_error(
+        astra_api.AstraRateLimitError(429, 4)
+    ) == "rate_limited"
+
+
+def test_deferred_backoff_is_bounded() -> None:
+    assert [
+        astra_coordinator._deferred_backoff_delay(n)
+        for n in range(1, 7)
+    ] == [
+        dt.timedelta(minutes=5),
+        dt.timedelta(minutes=10),
+        dt.timedelta(minutes=20),
+        dt.timedelta(minutes=40),
+        dt.timedelta(hours=1),
+        dt.timedelta(hours=1),
+    ]
+
+
+def test_deferred_backoff_skips_provider_and_preserves_last_error() -> None:
+    coordinator = object.__new__(astra_coordinator.AstraEnergyCoordinator)
+    coordinator.data = {"meter": object()}
+    coordinator._deferred_backoff_until = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=5)
+    coordinator.api_status = "deferred"
+    coordinator.response_class = "empty_html"
+    coordinator.client = types.SimpleNamespace(
+        async_get_meters=lambda: (_ for _ in ()).throw(AssertionError("provider called"))
+    )
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result == coordinator.data
+    assert coordinator.response_class == "empty_html"
+
+
 def test_endpoint_key_strips_query() -> None:
     assert endpoint_key("https://example.test/api/x?a=1") == "https://example.test/api/x"
 
@@ -1876,6 +1919,7 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     assert result["TEST_TOTAL_0"].raw == {"source": "recorder_fallback"}
     assert coordinator.api_status == "deferred"
     assert coordinator.last_successful_source == "recorder"
+    assert coordinator.last_successful_at is None
     assert coordinator.browser_proxy_status["status"] == "rejected"
 
 
@@ -2350,12 +2394,17 @@ def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider
         coordinator.web_session_status = {"status": "disabled"}
 
     coordinator._async_update_web_session_status = web_status
+    coordinator._deferred_failures = 4
+    coordinator._deferred_backoff_until = None
 
     result = asyncio.run(coordinator._async_update_data())
     reading = result["TEST_TOTAL_0"]
 
     assert coordinator.api_status == "ok"
     assert coordinator.last_successful_source == "mobile"
+    assert coordinator.last_successful_at is not None
+    assert coordinator._deferred_failures == 0
+    assert coordinator._deferred_backoff_until is None
     assert coordinator.last_error is None
     assert reading.grid_kwh_total == pytest.approx(4865.128)
     assert reading.solar_kwh_total == pytest.approx(822.977)

@@ -313,6 +313,12 @@
       },
       "browser_proxy_status": {
         "name": "Browser proxy status"
+      },
+      "last_successful_age": {
+        "name": "Last successful refresh age"
+      },
+      "response_class": {
+        "name": "Last response class"
       }
     }
   }

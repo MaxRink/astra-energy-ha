@@ -124,6 +124,8 @@ SENSOR_DISPLAY_NAMES = {
     "last_successful_source": "Astra Last Successful Source",
     "web_session_status": "Astra Web Session Status",
     "browser_proxy_status": "Astra Browser Proxy Status",
+    "last_successful_age": "Astra Last Successful Refresh Age",
+    "response_class": "Astra Last Response Class",
 }
 SENSOR_OBJECT_IDS = {
     "power": "astra_power",
@@ -160,6 +162,8 @@ SENSOR_OBJECT_IDS = {
     "last_successful_source": "astra_last_successful_source",
     "web_session_status": "astra_web_session_status",
     "browser_proxy_status": "astra_browser_proxy_status",
+    "last_successful_age": "astra_last_successful_refresh_age",
+    "response_class": "astra_response_class",
 }
 ISSUE_API_AUTH = "api_auth_failed"
 ISSUE_API_DEFERRED = "api_deferred"
