@@ -244,10 +244,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: AstraEnergyConfigEntry) 
     entry.runtime_data = coordinator
     coordinator.data = coordinator.data or {}
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
-
-    await coordinator.async_config_entry_first_refresh()
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    # Do not block platform setup on the provider. Astra can take tens of
+    # seconds or return an empty HTML response while its web session recovers;
+    # diagnostic sensors must still load so operators can see that state.
+    initial_refresh_task = hass.async_create_task(
+        _async_background_initial_refresh(coordinator)
+    )
+
+    def _cancel_initial_refresh() -> None:
+        initial_refresh_task.cancel()
+
+    entry.async_on_unload(_cancel_initial_refresh)
 
     if entry.options.get(CONF_IMPORT_STATISTICS, DEFAULT_IMPORT_STATISTICS):
 
