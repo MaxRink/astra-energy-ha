@@ -115,6 +115,7 @@ COORDINATOR_SENSOR_DESCRIPTIONS: tuple[AstraCoordinatorSensorEntityDescription, 
         icon="mdi:clock-check-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
         native_unit_of_measurement="s",
+        device_class=SensorDeviceClass.DURATION,
         suggested_display_precision=0,
     ),
     AstraCoordinatorSensorEntityDescription(

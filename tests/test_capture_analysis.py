@@ -94,6 +94,7 @@ homeassistant_sensor_mod.SensorDeviceClass = types.SimpleNamespace(
     ENUM="enum",
     MONETARY="monetary",
     POWER="power",
+    DURATION="duration",
 )
 homeassistant_sensor_mod.SensorEntity = StubSensorEntity
 homeassistant_sensor_mod.SensorEntityDescription = StubSensorEntityDescription
