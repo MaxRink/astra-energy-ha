@@ -4128,7 +4128,8 @@ def test_monotonic_reading_does_not_carry_month_context_across_month_boundary() 
     previous = astra_api.AstraMeterReading(
         meter_id="meter",
         meter_name="Astra Energy Meter",
-        timestamp=dt.datetime(2026, 6, 30, 23, 45, tzinfo=dt.UTC),
+        # 23:45 on June 30 in Europe/Berlin is 21:45 UTC.
+        timestamp=dt.datetime(2026, 6, 30, 21, 45, tzinfo=dt.UTC),
         power_w=None,
         imported_kwh_total=100.0,
         grid_kwh_total=100.0,
@@ -4144,7 +4145,7 @@ def test_monotonic_reading_does_not_carry_month_context_across_month_boundary() 
     fallback = astra_api.AstraMeterReading(
         meter_id="meter",
         meter_name="Astra Energy Meter",
-        timestamp=dt.datetime(2026, 7, 1, 0, 15, tzinfo=dt.UTC),
+        timestamp=dt.datetime(2026, 6, 30, 22, 15, tzinfo=dt.UTC),
         power_w=None,
         imported_kwh_total=101.0,
         grid_kwh_total=101.0,
@@ -4160,6 +4161,57 @@ def test_monotonic_reading_does_not_carry_month_context_across_month_boundary() 
     assert repaired.current_year_grid_kwh == 401.0
     assert repaired.current_year_solar_kwh == 100.5
     assert repaired.current_year_total_kwh == 501.5
+
+
+def test_monotonic_reading_uses_provider_local_year_boundary() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        # Jan 1 00:30 Berlin, still the same provider-local year as current.
+        timestamp=dt.datetime(2025, 12, 31, 23, 30, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        current_year_grid_kwh=40.0,
+        current_year_solar_kwh=10.0,
+        current_year_total_kwh=50.0,
+    )
+    current = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2025, 12, 31, 23, 45, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=101.0,
+        grid_kwh_total=101.0,
+        solar_kwh_total=20.5,
+        total_kwh=121.5,
+    )
+
+    repaired = astra_api.monotonic_reading(current, previous)
+
+    assert repaired.current_year_grid_kwh == 41.0
+    assert repaired.current_year_solar_kwh == 10.5
+    assert repaired.current_year_total_kwh == 51.5
+
+
+def test_period_cost_repair_preserves_explicit_zero_cost() -> None:
+    reading = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        grid_price_gross_eur_per_kwh=0.35,
+        current_month_grid_kwh=0.0,
+        current_month_grid_cost_gross_eur=0.0,
+    )
+
+    repaired = astra_api._reading_with_period_costs(reading)
+
+    assert repaired.current_month_grid_cost_gross_eur == 0.0
 
 
 def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:

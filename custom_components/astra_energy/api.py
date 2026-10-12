@@ -433,11 +433,17 @@ def _reading_with_period_context(
 
     month_values: dict[str, float | None] = {}
     year_values: dict[str, float | None] = {}
+    # Astra's period summaries are based on German local calendar periods.
+    # Comparing UTC fields misclassifies readings around midnight on New
+    # Year's Eve (and during DST transitions), causing month/year counters to
+    # inherit the wrong baseline.
+    reading_local = _provider_local_timestamp(reading.timestamp)
+    previous_local = _provider_local_timestamp(previous.timestamp)
     same_month = (
-        reading.timestamp.year == previous.timestamp.year
-        and reading.timestamp.month == previous.timestamp.month
+        reading_local.year == previous_local.year
+        and reading_local.month == previous_local.month
     )
-    same_year = reading.timestamp.year == previous.timestamp.year
+    same_year = reading_local.year == previous_local.year
     if same_month:
         month_values = _advanced_period_values(reading, previous, "current_month")
     if same_year:
@@ -565,24 +571,34 @@ def _reading_with_period_costs(reading: AstraMeterReading) -> AstraMeterReading:
     return replace(
         reading,
         current_month_grid_cost_gross_eur=(
-            reading.current_month_grid_cost_gross_eur or month_grid_cost
+            month_grid_cost
+            if reading.current_month_grid_cost_gross_eur is None
+            else reading.current_month_grid_cost_gross_eur
         ),
         current_month_solar_cost_gross_eur=(
-            reading.current_month_solar_cost_gross_eur or month_solar_cost
+            month_solar_cost
+            if reading.current_month_solar_cost_gross_eur is None
+            else reading.current_month_solar_cost_gross_eur
         ),
         current_month_total_cost_gross_eur=(
-            reading.current_month_total_cost_gross_eur
-            or _sum_present_costs(month_grid_cost, month_solar_cost)
+            _sum_present_costs(month_grid_cost, month_solar_cost)
+            if reading.current_month_total_cost_gross_eur is None
+            else reading.current_month_total_cost_gross_eur
         ),
         current_year_grid_cost_gross_eur=(
-            reading.current_year_grid_cost_gross_eur or year_grid_cost
+            year_grid_cost
+            if reading.current_year_grid_cost_gross_eur is None
+            else reading.current_year_grid_cost_gross_eur
         ),
         current_year_solar_cost_gross_eur=(
-            reading.current_year_solar_cost_gross_eur or year_solar_cost
+            year_solar_cost
+            if reading.current_year_solar_cost_gross_eur is None
+            else reading.current_year_solar_cost_gross_eur
         ),
         current_year_total_cost_gross_eur=(
-            reading.current_year_total_cost_gross_eur
-            or _sum_present_costs(year_grid_cost, year_solar_cost)
+            _sum_present_costs(year_grid_cost, year_solar_cost)
+            if reading.current_year_total_cost_gross_eur is None
+            else reading.current_year_total_cost_gross_eur
         ),
     )
 
