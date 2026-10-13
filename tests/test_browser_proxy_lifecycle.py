@@ -29,6 +29,21 @@ def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
         session.login()
 
 
+def test_health_distinguishes_stale_browser_context() -> None:
+    class ClosedContext:
+        @property
+        def pages(self):
+            raise RuntimeError("closed context")
+
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session._context = ClosedContext()
+
+    health = session.health()
+
+    assert health["browser_started"] is True
+    assert health["browser_context_healthy"] is False
+
+
 def test_current_starts_browser_before_using_restored_session(monkeypatch) -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
     events: list[str] = []

@@ -117,9 +117,17 @@ class AstraBrowserSession:
 
     def health(self) -> dict[str, Any]:
         with self._lock:
+            context_healthy: bool | None = None
+            if self._context is not None:
+                try:
+                    self._context.pages
+                    context_healthy = True
+                except Exception:  # noqa: BLE001
+                    context_healthy = False
             return {
                 "ok": True,
                 "browser_started": self._context is not None,
+                "browser_context_healthy": context_healthy,
                 "has_cookie": bool(self._last_cookie),
                 "has_session_id": bool(self._last_session_id),
                 "last_login_attempt": self._last_login_attempt,
