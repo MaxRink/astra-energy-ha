@@ -105,29 +105,43 @@ class AstraBrowserSession:
 
     def current(self) -> dict[str, Any]:
         with self._lock:
-            # Start the persistent browser even when a restored cookie/session
-            # is available, so the browser can refresh stale session metadata.
-            self._ensure_page()
-            self._capture_browser_session()
-            if not self._last_cookie or not self._last_session_id:
-                self.login()
+            phase = "ensure_page"
+            try:
+                # Start the persistent browser even when a restored cookie/session
+                # is available, so the browser can refresh stale session metadata.
+                self._ensure_page()
+                phase = "capture_session"
                 self._capture_browser_session()
-            if not self._last_cookie or not self._last_session_id:
-                raise AstraWebError(
-                    "No logged-in Astra browser session is available; complete login through CDP"
-                )
+                if not self._last_cookie or not self._last_session_id:
+                    phase = "login"
+                    self.login()
+                    self._capture_browser_session()
+                if not self._last_cookie or not self._last_session_id:
+                    raise AstraWebError(
+                        "No logged-in Astra browser session is available; complete login through CDP"
+                    )
 
-            html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
-            meter = parse_meter_widget(
-                html,
-                fallback_meter_id=self.config.meter_id,
-            )
-            return {
-                "ok": True,
-                "source": "astra_web_widget",
-                "fetched_at": datetime.now(ASTRA_TZ).isoformat(),
-                "meter": meter,
-            }
+                phase = "fetch_widget"
+                html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
+                phase = "parse_widget"
+                meter = parse_meter_widget(
+                    html,
+                    fallback_meter_id=self.config.meter_id,
+                )
+                return {
+                    "ok": True,
+                    "source": "astra_web_widget",
+                    "fetched_at": datetime.now(ASTRA_TZ).isoformat(),
+                    "meter": meter,
+                }
+            except AstraWebError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                # Keep provider details and session material out of the response,
+                # but retain the failing phase and safe exception class in logs/API.
+                raise AstraWebError(
+                    f"Astra current {phase} failed: {type(err).__name__}"
+                ) from err
 
     def _ensure_page(self):
         if self._context is None:

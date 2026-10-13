@@ -75,3 +75,67 @@ def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) ->
 
     assert len(attempts) == 2
     assert not any((tmp_path / name).exists() for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"))
+
+
+def test_current_reports_safe_fetch_phase_for_unexpected_provider_error() -> None:
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    session._ensure_page = lambda: None  # type: ignore[method-assign]
+    session._capture_browser_session = lambda: None  # type: ignore[method-assign]
+
+    def broken_fetch(*args):
+        raise RuntimeError("provider response must not escape")
+
+    session._fetch_meter_widget = broken_fetch  # type: ignore[method-assign]
+
+    with pytest.raises(app.AstraWebError, match="current fetch_widget failed: RuntimeError"):
+        session.current()
+
+
+def test_request_text_classifies_fake_http_failure_without_body() -> None:
+    class BrokenOpener:
+        def open(self, request, timeout):
+            raise app.HTTPError(request.full_url, 502, "bad gateway", {}, None)
+
+    with pytest.raises(app.AstraWebError, match="web returned HTTP 502"):
+        app.AstraBrowserSession._request_text(
+            BrokenOpener(),
+            "https://provider.invalid/widget",
+            data=None,
+            headers={},
+        )
+
+
+def test_fetch_widget_follows_dashboard_widget_route(monkeypatch) -> None:
+    calls = []
+
+    class Response:
+        def __init__(self, body):
+            self.body = body.encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return self.body
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            calls.append((request.full_url, request.method))
+            if request.full_url.endswith("/pm_customlogin.php"):
+                return Response('<iframe src="wg_replastzs.php?sessionId=session"></iframe>')
+            return Response("Strom VGB 1,00 kWh")
+
+    monkeypatch.setattr(app, "build_opener", lambda: FakeOpener())
+    session = app.AstraBrowserSession(app.ProxyConfig(web_base_url="https://provider.invalid/base"))
+    html = session._fetch_meter_widget("session", "cookie=value")
+
+    assert html == "Strom VGB 1,00 kWh"
+    assert calls == [
+        ("https://provider.invalid/base/pm_customlogin.php", "POST"),
+        ("https://provider.invalid/base/wg_replastzs.php?sessionId=session", "GET"),
+    ]
