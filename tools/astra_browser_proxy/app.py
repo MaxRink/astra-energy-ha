@@ -249,6 +249,20 @@ class AstraBrowserSession:
             raise AstraWebError("history date is outside the supported range")
         with self._lock:
             self.current()
+            headers = {
+                "User-Agent": "Mozilla/5.0 AstraEnergyBrowserProxy/1.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Cookie": self._last_cookie,
+            }
+            opener = build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url)))
+            dashboard = self._request_text(
+                opener,
+                f"{self.config.web_base_url}/pm_customlogin.php",
+                data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
+                headers=headers,
+                timeout_seconds=self.config.dashboard_timeout_seconds,
+            )
+            route = re.search(r"(?:[\"'])([^\"']*pm_graph\.php[^\"']*)(?:[\"'])", dashboard)
             params = {
                 "sessionId": self._last_session_id,
                 "s_vom": start.strftime("%d.%m.%Y"),
@@ -256,12 +270,23 @@ class AstraBrowserSession:
                 "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
                 "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
             }
-            url = f"{self.config.web_base_url}/pm_graph.php?{urlencode(params)}"
+            if route:
+                observed = parse_qs(urlparse(unescape(route.group(1))).query)
+                params.update({key: values[0] for key, values in observed.items() if values})
+                params["sessionId"] = self._last_session_id
+                params["s_vom"] = start.strftime("%d.%m.%Y")
+                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
+                params["s_tvom"] = start.strftime("%Y-%m-%d 00:00:00")
+                params["s_tbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+                graph_path = urljoin(f"{self.config.web_base_url}/", unescape(route.group(1))).split("?", 1)[0]
+            else:
+                graph_path = f"{self.config.web_base_url}/pm_graph.php"
+            url = f"{graph_path}?{urlencode(params)}"
             html = self._request_text(
-                build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url))),
+                opener,
                 url,
                 data=None,
-                headers={"Cookie": self._last_cookie, "User-Agent": "AstraEnergyBrowserProxy/1.0"},
+                headers=headers,
                 timeout_seconds=60,
             )
             points = _parse_graph_points(html)
