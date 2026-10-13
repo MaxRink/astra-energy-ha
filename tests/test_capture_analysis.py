@@ -1535,6 +1535,7 @@ def test_coordinator_deferred_update_creates_warning_issue(monkeypatch) -> None:
         base_url="https://example.test",
         update_interval=dt.timedelta(minutes=15),
     )
+
     coordinator.client = Client()
 
     async def web_status():
@@ -5314,3 +5315,53 @@ def test_interval_start_baseline_derives_grid_from_total_and_solar(monkeypatch) 
 
 def test_interval_start_baseline_is_none_without_recorder_states(monkeypatch) -> None:
     assert _interval_baseline_with_states(monkeypatch, {}) is None
+
+
+def test_browser_proxy_single_flight_and_failure_cooldown(monkeypatch) -> None:
+    calls = 0
+    clock = [1000.0]
+
+    async def proxy_readings(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        if calls == 1:
+            raise browser_proxy.AstraBrowserProxyError("upstream timeout")
+        return []
+
+    monkeypatch.setattr(astra_coordinator.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        astra_coordinator, "async_fetch_browser_proxy_readings", proxy_readings
+    )
+    coordinator = astra_coordinator.AstraEnergyCoordinator(
+        hass=object(),
+        entry=types.SimpleNamespace(
+            options={
+                astra_coordinator.CONF_BROWSER_PROXY_ENABLED: True,
+                astra_coordinator.CONF_BROWSER_PROXY_URL: "http://proxy.example.test",
+            }
+        ),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+        update_interval=dt.timedelta(minutes=15),
+    )
+
+    async def empty_previous(_readings):
+        return {}
+
+    coordinator._async_previous_readings = empty_previous  # type: ignore[method-assign]
+
+    async def run_concurrent() -> None:
+        await asyncio.gather(
+            coordinator._async_browser_proxy_fallback_readings(),
+            coordinator._async_browser_proxy_fallback_readings(),
+        )
+
+    asyncio.run(run_concurrent())
+    assert calls == 1
+    assert coordinator.browser_proxy_status["status"] == "cooldown"
+
+    clock[0] += 30
+    assert asyncio.run(coordinator._async_browser_proxy_fallback_readings()) == {}
+    assert calls == 2

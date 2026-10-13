@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta
 
@@ -83,6 +84,8 @@ _BASELINE_COST_STATISTIC_ATTRS = {
 }
 _MAX_STARTUP_BASELINE_REPAIR_KWH = 50.0
 _MAX_STARTUP_BASELINE_HOLD_KWH = 1500.0
+_BROWSER_PROXY_COOLDOWN_BASE_SECONDS = 30.0
+_BROWSER_PROXY_COOLDOWN_MAX_SECONDS = 300.0
 
 
 def _api_status_for_error(err: AstraApiError) -> str:
@@ -158,6 +161,9 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
         self._recorder_baselines_loaded = False
         self._last_mobile_success_at = None
         self._backfill_lock = asyncio.Lock()
+        self._browser_proxy_lock = asyncio.Lock()
+        self._browser_proxy_cooldown_until = 0.0
+        self._browser_proxy_failure_count = 0
 
     async def _async_update_data(self) -> dict[str, AstraMeterReading]:
         """Fetch latest Astra data."""
@@ -386,35 +392,54 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             )
             return None
 
-        try:
-            readings = await async_fetch_browser_proxy_readings(
-                async_get_clientsession(self.hass),
+        if time.monotonic() < self._browser_proxy_cooldown_until:
+            self._set_browser_proxy_status(
+                "cooldown",
+                message="Browser proxy retry deferred after a previous failure",
                 url=url,
-                token=self.config_entry.options.get(
-                    CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
-                ),
-                grid_price_net=float(
-                    self.config_entry.options.get(
-                        CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET
-                    )
-                ),
-                solar_price_net=float(
-                    self.config_entry.options.get(
-                        CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET
-                    )
-                ),
-                tax_rate=float(
-                    self.config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE)
-                ),
             )
-        except AstraBrowserProxyAuthError as err:
-            self._set_browser_proxy_status("unauthorized", message=str(err), url=url)
-            _LOGGER.warning("Astra browser proxy authorization failed: %s", err)
             return None
-        except AstraApiError as err:
-            self._set_browser_proxy_status("error", message=str(err), url=url)
-            _LOGGER.warning("Astra browser proxy fallback failed: %s", err)
-            return None
+
+        async with self._browser_proxy_lock:
+            # A second deferred caller may have waited for the first request.
+            if time.monotonic() < self._browser_proxy_cooldown_until:
+                self._set_browser_proxy_status(
+                    "cooldown",
+                    message="Browser proxy retry deferred after a previous failure",
+                    url=url,
+                )
+                return None
+            try:
+                readings = await async_fetch_browser_proxy_readings(
+                    async_get_clientsession(self.hass),
+                    url=url,
+                    token=self.config_entry.options.get(
+                        CONF_BROWSER_PROXY_TOKEN, DEFAULT_BROWSER_PROXY_TOKEN
+                    ),
+                    grid_price_net=float(
+                        self.config_entry.options.get(
+                            CONF_GRID_PRICE_NET, DEFAULT_GRID_PRICE_NET
+                        )
+                    ),
+                    solar_price_net=float(
+                        self.config_entry.options.get(
+                            CONF_SOLAR_PRICE_NET, DEFAULT_SOLAR_PRICE_NET
+                        )
+                    ),
+                    tax_rate=float(
+                        self.config_entry.options.get(CONF_TAX_RATE, DEFAULT_TAX_RATE)
+                    ),
+                )
+            except AstraBrowserProxyAuthError as err:
+                self._record_browser_proxy_failure()
+                self._set_browser_proxy_status("unauthorized", message=str(err), url=url)
+                _LOGGER.warning("Astra browser proxy authorization failed: %s", err)
+                return None
+            except AstraApiError as err:
+                self._record_browser_proxy_failure()
+                self._set_browser_proxy_status("error", message=str(err), url=url)
+                _LOGGER.warning("Astra browser proxy fallback failed: %s", err)
+                return None
 
         now = dt_util.utcnow()
         previous_readings = await self._async_previous_readings(readings)
@@ -441,9 +466,12 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                     url=url,
                     reading_count=len(readings),
                 )
+                self._record_browser_proxy_failure()
                 return None
             normalized_readings[reading.meter_id] = monotonic_reading(reading, previous)
 
+        self._browser_proxy_failure_count = 0
+        self._browser_proxy_cooldown_until = 0.0
         self.api_status = "browser_proxy"
         self.last_successful_source = "browser_proxy"
         self.last_error = None
@@ -451,6 +479,16 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             "ok", url=url, reading_count=len(normalized_readings)
         )
         return normalized_readings
+
+    def _record_browser_proxy_failure(self) -> None:
+        """Apply bounded exponential backoff after a proxy failure."""
+        self._browser_proxy_failure_count += 1
+        delay = min(
+            _BROWSER_PROXY_COOLDOWN_BASE_SECONDS
+            * (2 ** (self._browser_proxy_failure_count - 1)),
+            _BROWSER_PROXY_COOLDOWN_MAX_SECONDS,
+        )
+        self._browser_proxy_cooldown_until = time.monotonic() + delay
 
     def _set_browser_proxy_status(
         self,
