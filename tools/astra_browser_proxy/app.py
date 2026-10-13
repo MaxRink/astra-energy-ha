@@ -342,9 +342,14 @@ class AstraBrowserSession:
             return
         expected_origin = _origin(self.config.web_base_url)
         try:
-            cookies = self._context.cookies([self.config.web_base_url])
-        except TypeError:
-            cookies = self._context.cookies()
+            try:
+                cookies = self._context.cookies([self.config.web_base_url])
+            except TypeError:
+                # Older Playwright/CloakBrowser builds do not accept an
+                # origin argument. Keep the fallback inside the same
+                # recovery boundary because a closed context can fail both
+                # calls with different exception types.
+                cookies = self._context.cookies()
         except Exception as err:  # noqa: BLE001
             self._invalidate_context()
             raise AstraWebError("Astra browser context is unavailable") from err
