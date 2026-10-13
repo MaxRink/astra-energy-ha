@@ -92,7 +92,7 @@ def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) ->
     assert not any((tmp_path / name).exists() for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"))
 
 
-def test_ensure_page_recreates_closed_browser_context(monkeypatch) -> None:
+def test_ensure_page_recreates_closed_browser_context(monkeypatch, tmp_path) -> None:
     class ClosedContext:
         @property
         def pages(self):
@@ -117,7 +117,7 @@ def test_ensure_page_recreates_closed_browser_context(monkeypatch) -> None:
         return FreshContext()
 
     monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(launch_persistent_context=launch))
-    session = app.AstraBrowserSession(app.ProxyConfig())
+    session = app.AstraBrowserSession(app.ProxyConfig(profile_dir=str(tmp_path)))
     session._context = ClosedContext()
     session._page = object()
 
@@ -127,7 +127,7 @@ def test_ensure_page_recreates_closed_browser_context(monkeypatch) -> None:
     assert session._context.__class__ is FreshContext
 
 
-def test_capture_session_recovers_once_from_closed_context(monkeypatch) -> None:
+def test_capture_session_recovers_once_from_closed_context(monkeypatch, tmp_path) -> None:
     class ClosedContext:
         def cookies(self, *args):
             raise RuntimeError("closed context")
@@ -151,7 +151,7 @@ def test_capture_session_recovers_once_from_closed_context(monkeypatch) -> None:
         return FreshContext()
 
     monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(launch_persistent_context=launch))
-    session = app.AstraBrowserSession(app.ProxyConfig())
+    session = app.AstraBrowserSession(app.ProxyConfig(profile_dir=str(tmp_path)))
     session._context = ClosedContext()
     session._page = object()
     session._last_cookie = "restored-cookie"
