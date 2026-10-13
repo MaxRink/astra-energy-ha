@@ -136,8 +136,7 @@ class AstraBrowserSession:
             except ImportError as err:
                 raise AstraWebError("CloakBrowser is not installed in the sidecar") from err
             os.makedirs(self.config.profile_dir, exist_ok=True)
-            self._context = launch_persistent_context(
-                self.config.profile_dir,
+            options = dict(
                 headless=self.config.headless,
                 locale="de-DE",
                 timezone="Europe/Berlin",
@@ -147,10 +146,34 @@ class AstraBrowserSession:
                     "--disable-http2",
                 ],
             )
+            try:
+                self._context = launch_persistent_context(self.config.profile_dir, **options)
+            except Exception as err:  # noqa: BLE001
+                # A crashed Chromium leaves only these profile lock markers.
+                # Remove those markers, never cookies/session data, and retry
+                # once so a restart can recover the persisted Astra session.
+                self._clear_stale_profile_locks()
+                LOGGER.warning("Astra browser launch retry: %s", type(err).__name__)
+                try:
+                    self._context = launch_persistent_context(self.config.profile_dir, **options)
+                except Exception as retry_err:  # noqa: BLE001
+                    raise AstraWebError(
+                        f"Astra browser launch failed: {type(retry_err).__name__}"
+                    ) from retry_err
         pages = self._context.pages
         if self._page is None:
             self._page = pages[0] if pages else self._context.new_page()
         return self._page
+
+    def _clear_stale_profile_locks(self) -> None:
+        for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
+            path = os.path.join(self.config.profile_dir, name)
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                continue
+            except OSError as err:
+                LOGGER.warning("Could not clear Astra profile lock: %s", type(err).__name__)
 
     def _fill_best_effort_login(self, page) -> None:
         selectors = (
