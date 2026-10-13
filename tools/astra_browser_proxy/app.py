@@ -255,12 +255,6 @@ class AstraBrowserSession:
                 "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y"),
                 "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
                 "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
-                "s_bvom": start.strftime("%Y-%m-%d 00:00:00"),
-                "s_bbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
-                "id": "",
-                "s_prod": "",
-                "s_width": "1600",
-                "s_height": "900",
             }
             url = f"{self.config.web_base_url}/pm_graph.php?{urlencode(params)}"
             html = self._request_text(
