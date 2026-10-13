@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,3 +47,31 @@ def test_current_starts_browser_before_using_restored_session(monkeypatch) -> No
 
     assert result["ok"] is True
     assert events[:2] == ["ensure", "capture"]
+
+
+def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) -> None:
+    for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    attempts = []
+
+    class Context:
+        pages = []
+
+        def new_page(self):
+            return object()
+
+    def launch(profile, **options):
+        attempts.append((profile, options))
+        if len(attempts) == 1:
+            raise RuntimeError("stale profile lock")
+        return Context()
+
+    monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(launch_persistent_context=launch))
+    session = app.AstraBrowserSession(app.ProxyConfig(profile_dir=str(tmp_path)))
+
+    session._ensure_page()
+
+    assert len(attempts) == 2
+    assert not any((tmp_path / name).exists() for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"))
