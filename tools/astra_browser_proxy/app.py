@@ -83,7 +83,13 @@ class AstraBrowserSession:
     def login(self) -> dict[str, Any]:
         with self._lock:
             page = self._ensure_page()
-            page.goto(self.config.login_url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.goto(self.config.login_url, wait_until="domcontentloaded", timeout=30000)
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning("Astra browser navigation failed: %s", type(err).__name__)
+                raise AstraWebError(
+                    f"Astra browser navigation failed: {type(err).__name__}"
+                ) from err
             self._last_login_attempt = datetime.now(ASTRA_TZ).isoformat()
             if self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
@@ -99,6 +105,9 @@ class AstraBrowserSession:
 
     def current(self) -> dict[str, Any]:
         with self._lock:
+            # Start the persistent browser even when a restored cookie/session
+            # is available, so the browser can refresh stale session metadata.
+            self._ensure_page()
             self._capture_browser_session()
             if not self._last_cookie or not self._last_session_id:
                 self.login()
@@ -358,6 +367,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, SESSION.login())
             except AstraWebError as err:
                 self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning("Login request failed: %s", type(err).__name__)
+                self._send_json(
+                    HTTPStatus.BAD_GATEWAY,
+                    {"ok": False, "error": f"Astra browser login failed: {type(err).__name__}"},
+                )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
@@ -365,8 +380,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._send_json(HTTPStatus.OK, SESSION.current())
         except AstraWebError as err:
-            LOGGER.warning("Current fetch failed: %s", err)
+            LOGGER.warning("Current fetch failed: %s", type(err).__name__)
             self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning("Current request failed: %s", type(err).__name__)
+            self._send_json(
+                HTTPStatus.BAD_GATEWAY,
+                {"ok": False, "error": f"Astra current request failed: {type(err).__name__}"},
+            )
 
     def _authorized(self) -> bool:
         if not CONFIG.shared_token:
