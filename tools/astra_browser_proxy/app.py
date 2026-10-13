@@ -8,7 +8,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import unescape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -235,6 +235,46 @@ class AstraBrowserSession:
             self._current_phase = "complete"
             return json.loads(json.dumps(result))
 
+    def history(self, day: str) -> dict[str, Any]:
+        """Read one provider day as timestamped graph intervals.
+
+        This is deliberately a bounded, read-only operation.  It uses the
+        already authenticated browser session and never writes HA history.
+        """
+        try:
+            start = date.fromisoformat(day)
+        except ValueError as err:
+            raise AstraWebError("history date must be YYYY-MM-DD") from err
+        if start < date(2020, 1, 1) or start > date.today() + timedelta(days=1):
+            raise AstraWebError("history date is outside the supported range")
+        with self._lock:
+            self.current()
+            params = {
+                "sessionId": self._last_session_id,
+                "s_vom": start.strftime("%d.%m.%Y"),
+                "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y"),
+                "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
+                "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "s_bvom": start.strftime("%Y-%m-%d 00:00:00"),
+                "s_bbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "id": "",
+                "s_prod": "",
+                "s_width": "1600",
+                "s_height": "900",
+            }
+            url = f"{self.config.web_base_url}/pm_graph.php?{urlencode(params)}"
+            html = self._request_text(
+                build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url))),
+                url,
+                data=None,
+                headers={"Cookie": self._last_cookie, "User-Agent": "AstraEnergyBrowserProxy/1.0"},
+                timeout_seconds=60,
+            )
+            points = _parse_graph_points(html)
+            if not points:
+                raise AstraWebError("Astra history graph contained no timestamped intervals")
+            return {"ok": True, "source": "astra_web_graph", "date": day, "points": points}
+
     def _ensure_page(self):
         if self._context is not None:
             try:
@@ -448,6 +488,32 @@ def _find_widget_url(dashboard_html: str, base_url: str, session_id: str) -> str
     return f"{base_url}/wg_replastzs.php?{urlencode({'sessionId': session_id})}"
 
 
+_GRAPH_TITLE_RE = re.compile(
+    r'TITLE="[^"]* ist\s+([0-9.,-]+)\s+kWh\s+um\s+'
+    r"(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2})",
+    re.IGNORECASE,
+)
+
+
+def _parse_graph_points(html: str) -> list[dict[str, Any]]:
+    """Parse graph image-map markers into timestamped cumulative/interval data."""
+    values: dict[datetime, list[float]] = {}
+    for raw_value, raw_timestamp in _GRAPH_TITLE_RE.findall(html):
+        timestamp = datetime.strptime(raw_timestamp, "%d.%m.%Y %H:%M:%S").replace(tzinfo=ASTRA_TZ)
+        value = _parse_german_number(raw_value)
+        values.setdefault(timestamp, []).append(value)
+    points = []
+    for timestamp, readings in sorted(values.items()):
+        positive = [value for value in readings if value >= 0]
+        if positive:
+            points.append({
+                "timestamp": timestamp.isoformat(),
+                "cumulative_kwh": max(positive),
+                "interval_kwh": min(positive),
+            })
+    return points
+
+
 def _cookie_matches_origin(cookie: dict[str, Any], expected: tuple[str, str, int | None]) -> bool:
     domain = str(cookie.get("domain") or "").lstrip(".").lower()
     return bool(domain) and domain == expected[1]
@@ -559,6 +625,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/current":
             self._handle_current()
             return
+        if self.path.startswith("/history"):
+            self._handle_history()
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -591,6 +660,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
                 {"ok": False, "error": f"Astra current request failed: phase={phase} error_type={type(err).__name__}"},
+            )
+
+    def _handle_history(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        day = (query.get("date") or [""])[0]
+        try:
+            self._send_json(HTTPStatus.OK, SESSION.history(day))
+        except AstraWebError as err:
+            LOGGER.warning("History fetch failed: %s", type(err).__name__)
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning("Astra history request failed: error_type=%s", type(err).__name__)
+            self._send_json(
+                HTTPStatus.BAD_GATEWAY,
+                {"ok": False, "error": f"Astra history request failed: {type(err).__name__}"},
             )
 
     def _authorized(self) -> bool:

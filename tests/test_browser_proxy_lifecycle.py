@@ -16,6 +16,21 @@ sys.modules[SPEC.name] = app
 SPEC.loader.exec_module(app)
 
 
+def test_graph_parser_preserves_timestamp_and_separates_cumulative_interval() -> None:
+    html = (
+        '<area TITLE="Strom VGB ist 12,5 kWh um 11.10.2026 00:15:00">'
+        '<area TITLE="Strom VGB ist 100,0 kWh um 11.10.2026 00:15:00">'
+    )
+    points = app._parse_graph_points(html)
+    assert points == [
+        {
+            "timestamp": "2026-10-11T00:15:00+02:00",
+            "cumulative_kwh": 100.0,
+            "interval_kwh": 12.5,
+        }
+    ]
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 
