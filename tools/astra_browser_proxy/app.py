@@ -173,7 +173,19 @@ class AstraBrowserSession:
             self._ensure_page()
             capture_started = perf_counter()
             self._current_phase = "capture_session"
-            self._capture_browser_session()
+            try:
+                self._capture_browser_session()
+            except AstraWebError as err:
+                # A crashed browser context can retain truthy cookie/session
+                # metadata while every Playwright operation fails. Recreate
+                # it once so a normal refresh can recover without exposing
+                # provider credentials or hammering the login endpoint.
+                LOGGER.warning(
+                    "phase=capture_session_recover error_type=%s",
+                    type(err).__name__,
+                )
+                self._ensure_page()
+                self._capture_browser_session()
             LOGGER.info("phase=capture_session elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - capture_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
             if not self._last_cookie or not self._last_session_id:
                 LOGGER.info("phase=login_start")
@@ -216,6 +228,21 @@ class AstraBrowserSession:
             return json.loads(json.dumps(result))
 
     def _ensure_page(self):
+        if self._context is not None:
+            try:
+                pages = self._context.pages
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning(
+                    "phase=browser_context_stale error_type=%s",
+                    type(err).__name__,
+                )
+                self._invalidate_context()
+            else:
+                if self._page is not None and getattr(self._page, "is_closed", lambda: False)():
+                    self._page = None
+                if self._page is None:
+                    self._page = pages[0] if pages else self._context.new_page()
+                return self._page
         if self._context is None:
             try:
                 from cloakbrowser import launch_persistent_context
@@ -247,6 +274,16 @@ class AstraBrowserSession:
         if self._page is None:
             self._page = pages[0] if pages else self._context.new_page()
         return self._page
+
+    def _invalidate_context(self) -> None:
+        context = self._context
+        self._context = None
+        self._page = None
+        if context is not None:
+            try:
+                context.close()
+            except Exception as err:  # noqa: BLE001
+                LOGGER.debug("Could not close stale Astra browser context: %s", type(err).__name__)
 
     def _clear_stale_profile_locks(self) -> None:
         for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
@@ -300,6 +337,9 @@ class AstraBrowserSession:
             cookies = self._context.cookies([self.config.web_base_url])
         except TypeError:
             cookies = self._context.cookies()
+        except Exception as err:  # noqa: BLE001
+            self._invalidate_context()
+            raise AstraWebError("Astra browser context is unavailable") from err
         cookies = [
             cookie
             for cookie in cookies

@@ -77,6 +77,79 @@ def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) ->
     assert not any((tmp_path / name).exists() for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"))
 
 
+def test_ensure_page_recreates_closed_browser_context(monkeypatch) -> None:
+    class ClosedContext:
+        @property
+        def pages(self):
+            raise RuntimeError("closed context")
+
+        def close(self):
+            return None
+
+    class FreshContext:
+        pages = []
+
+        def cookies(self, *args):
+            return []
+
+        def new_page(self):
+            return object()
+
+    launches = []
+
+    def launch(profile, **options):
+        launches.append(profile)
+        return FreshContext()
+
+    monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(launch_persistent_context=launch))
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session._context = ClosedContext()
+    session._page = object()
+
+    session._ensure_page()
+
+    assert launches == [session.config.profile_dir]
+    assert session._context.__class__ is FreshContext
+
+
+def test_capture_session_recovers_once_from_closed_context(monkeypatch) -> None:
+    class ClosedContext:
+        def cookies(self, *args):
+            raise RuntimeError("closed context")
+
+        def close(self):
+            return None
+
+    class FreshContext:
+        pages = []
+
+        def cookies(self, *args):
+            return []
+
+        def new_page(self):
+            return object()
+
+    launches = []
+
+    def launch(profile, **options):
+        launches.append(profile)
+        return FreshContext()
+
+    monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(launch_persistent_context=launch))
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session._context = ClosedContext()
+    session._page = object()
+    session._last_cookie = "restored-cookie"
+    session._last_session_id = "restored-session"
+    session._fetch_meter_widget = lambda *args: "Strom VGB 1,00 kWh"  # type: ignore[method-assign]
+    monkeypatch.setattr(app, "parse_meter_widget", lambda html, fallback_meter_id: {"meter_id": fallback_meter_id})
+
+    result = session.current()
+
+    assert result["ok"] is True
+    assert launches == [session.config.profile_dir]
+
+
 def test_current_reports_safe_fetch_phase_for_unexpected_provider_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
     session._last_cookie = "cookie"
