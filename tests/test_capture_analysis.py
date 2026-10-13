@@ -4525,6 +4525,45 @@ def test_recorder_baseline_repairs_restart_provider_split_rollback() -> None:
     assert repaired.raw["monotonic_repair"]["previous_grid_kwh_total"] == 4784.3
 
 
+def test_recorder_baseline_preserves_cost_across_restart_and_tariff_change() -> None:
+    provider = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL/0",
+        meter_name="Strom",
+        timestamp=dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        grid_price_gross_eur_per_kwh=0.50,
+        solar_price_gross_eur_per_kwh=0.40,
+        grid_cost_total_gross_eur=50.0,
+        solar_cost_total_gross_eur=8.0,
+        total_cost_total_gross_eur=58.0,
+    )
+    baseline = astra_coordinator._baseline_reading_from_statistics(
+        provider,
+        {
+            "sensor.astra_grid_energy": 100.0,
+            "sensor.astra_solar_energy": 20.0,
+            "sensor.astra_total_energy": 120.0,
+            "sensor.astra_grid_energy_cost_total": 30.0,
+            "sensor.astra_solar_energy_cost_total": 4.0,
+            "sensor.astra_total_energy_cost_total": 34.0,
+        },
+    )
+
+    assert baseline is not None
+    repaired = astra_api.monotonic_reading(provider, baseline)
+
+    assert baseline.grid_cost_total_gross_eur == 30.0
+    assert baseline.solar_cost_total_gross_eur == 4.0
+    assert baseline.total_cost_total_gross_eur == 34.0
+    assert repaired.grid_cost_total_gross_eur == 30.0
+    assert repaired.solar_cost_total_gross_eur == 4.0
+    assert repaired.total_cost_total_gross_eur == 34.0
+
+
 def test_recorder_baseline_returns_none_without_statistics() -> None:
     reading = astra_api.AstraMeterReading(
         meter_id="TEST_TOTAL/0",

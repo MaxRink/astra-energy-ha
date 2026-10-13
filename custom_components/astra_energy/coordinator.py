@@ -967,6 +967,17 @@ def _baseline_reading_from_statistics(
     )
     if all(value is None for value in values.values()):
         return None
+    grid_cost = statistic_states.get(
+        f"sensor.{SENSOR_OBJECT_IDS['grid_energy_cost_total']}"
+    )
+    solar_cost = statistic_states.get(
+        f"sensor.{SENSOR_OBJECT_IDS['solar_energy_cost_total']}"
+    )
+    total_cost = statistic_states.get(
+        f"sensor.{SENSOR_OBJECT_IDS['total_energy_cost_total']}"
+    )
+    if total_cost is None and (grid_cost is not None or solar_cost is not None):
+        total_cost = _round_or_none((grid_cost or 0.0) + (solar_cost or 0.0), 4)
     return AstraMeterReading(
         meter_id=reading.meter_id,
         meter_name=reading.meter_name,
@@ -976,6 +987,9 @@ def _baseline_reading_from_statistics(
         grid_kwh_total=values["grid_kwh_total"],
         solar_kwh_total=values["solar_kwh_total"],
         total_kwh=values["total_kwh"],
+        grid_cost_total_gross_eur=grid_cost,
+        solar_cost_total_gross_eur=solar_cost,
+        total_cost_total_gross_eur=total_cost,
         raw={"source": "recorder_baseline"},
     )
 
