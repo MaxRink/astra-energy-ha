@@ -341,28 +341,63 @@ def _max_present(*values: float | None) -> float | None:
     return max(present) if present else None
 
 
-def _reading_with_repriced_totals(reading: AstraMeterReading) -> AstraMeterReading:
-    """Recalculate dependent totals and costs after cumulative repair."""
-    grid_total = (
-        reading.grid_kwh_total
-        if reading.grid_kwh_total is not None
-        else reading.imported_kwh_total
+def _accumulated_cost(
+    current_total: float | None,
+    previous_total: float | None,
+    current_cost: float | None,
+    previous_cost: float | None,
+    current_price: float | None,
+) -> float | None:
+    """Keep lifetime cost totals stable across tariff changes.
+
+    A provider can recompute a lifetime cost at the current tariff even when
+    the lifetime energy counter did not advance.  That is a repricing of old
+    consumption, not new cost.  Only a verified positive cumulative-energy
+    delta is charged at the currently observed tariff.  A counter reset or an
+    unavailable baseline preserves the provider value and avoids inventing
+    historical prices.
+    """
+    if previous_cost is None or previous_total is None or current_total is None:
+        return current_cost
+    delta = current_total - previous_total
+    if delta <= 0 or current_price is None or current_price < 0:
+        return previous_cost
+    return round(previous_cost + (delta * current_price), 4)
+
+
+def _reading_with_lifetime_cost_context(
+    reading: AstraMeterReading,
+    previous: AstraMeterReading | None,
+) -> AstraMeterReading:
+    """Accumulate lifetime costs from verified energy deltas only."""
+    if previous is None:
+        return reading
+    grid = _grid_total(reading)
+    previous_grid = _grid_total(previous)
+    grid_cost = _accumulated_cost(
+        grid,
+        previous_grid,
+        reading.grid_cost_total_gross_eur,
+        previous.grid_cost_total_gross_eur,
+        reading.grid_price_gross_eur_per_kwh,
     )
-    grid_cost = _cost_gross(grid_total, reading.grid_price_gross_eur_per_kwh)
-    solar_cost = _cost_gross(
-        reading.solar_kwh_total, reading.solar_price_gross_eur_per_kwh
+    solar_cost = _accumulated_cost(
+        reading.solar_kwh_total,
+        previous.solar_kwh_total,
+        reading.solar_cost_total_gross_eur,
+        previous.solar_cost_total_gross_eur,
+        reading.solar_price_gross_eur_per_kwh,
+    )
+    total_cost = (
+        round((grid_cost or 0.0) + (solar_cost or 0.0), 4)
+        if grid_cost is not None or solar_cost is not None
+        else reading.total_cost_total_gross_eur
     )
     return replace(
         reading,
-        imported_kwh_total=grid_total,
         grid_cost_total_gross_eur=grid_cost,
         solar_cost_total_gross_eur=solar_cost,
-        total_cost_total_gross_eur=_round_or_none(
-            (grid_cost or 0.0) + (solar_cost or 0.0),
-            4,
-        )
-        if grid_cost is not None or solar_cost is not None
-        else None,
+        total_cost_total_gross_eur=total_cost,
     )
 
 
@@ -400,7 +435,9 @@ def monotonic_reading(
         and solar == reading.solar_kwh_total
         and total == reading.total_kwh
     ):
-        return _reading_with_period_context(reading, previous)
+        return _reading_with_lifetime_cost_context(
+            _reading_with_period_context(reading, previous), previous
+        )
 
     repaired = replace(
         reading,
@@ -420,7 +457,9 @@ def monotonic_reading(
             },
         },
     )
-    return _reading_with_period_context(_reading_with_repriced_totals(repaired), previous)
+    return _reading_with_lifetime_cost_context(
+        _reading_with_period_context(repaired, previous), previous
+    )
 
 
 def _reading_with_period_context(

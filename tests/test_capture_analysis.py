@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 import types
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -4200,6 +4200,9 @@ def test_monotonic_reading_repairs_observed_provider_split_rollback() -> None:
         total_kwh=5533.139,
         grid_price_gross_eur_per_kwh=0.34986,
         solar_price_gross_eur_per_kwh=0.2499,
+        grid_cost_total_gross_eur=1673.8352,
+        solar_cost_total_gross_eur=187.1349,
+        total_cost_total_gross_eur=1860.9701,
     )
     provider = astra_api.AstraMeterReading(
         meter_id="meter",
@@ -4225,6 +4228,115 @@ def test_monotonic_reading_repairs_observed_provider_split_rollback() -> None:
     assert repaired.solar_cost_total_gross_eur == 190.8209
     assert repaired.total_cost_total_gross_eur == 1864.6561
     assert repaired.raw["monotonic_repair"]["provider_grid_kwh_total"] == 4783.599
+
+
+def test_monotonic_reading_does_not_reprice_lifetime_cost_on_tariff_change() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 21, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        grid_price_gross_eur_per_kwh=0.30,
+        grid_cost_total_gross_eur=30.0,
+        solar_price_gross_eur_per_kwh=0.20,
+        solar_cost_total_gross_eur=4.0,
+        total_cost_total_gross_eur=34.0,
+    )
+    provider = replace(
+        previous,
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        grid_price_gross_eur_per_kwh=0.50,
+        grid_cost_total_gross_eur=50.0,
+        solar_price_gross_eur_per_kwh=0.40,
+        solar_cost_total_gross_eur=8.0,
+        total_cost_total_gross_eur=58.0,
+    )
+
+    current = astra_api.monotonic_reading(provider, previous)
+
+    assert current.grid_cost_total_gross_eur == 30.0
+    assert current.solar_cost_total_gross_eur == 4.0
+    assert current.total_cost_total_gross_eur == 34.0
+
+
+def test_monotonic_reading_charges_only_positive_delta_at_current_tariff() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 21, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        grid_price_gross_eur_per_kwh=0.30,
+        grid_cost_total_gross_eur=30.0,
+        solar_price_gross_eur_per_kwh=0.20,
+        solar_cost_total_gross_eur=4.0,
+        total_cost_total_gross_eur=34.0,
+    )
+    provider = replace(
+        previous,
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        imported_kwh_total=102.0,
+        grid_kwh_total=102.0,
+        solar_kwh_total=21.0,
+        total_kwh=123.0,
+        grid_price_gross_eur_per_kwh=0.50,
+        grid_cost_total_gross_eur=51.0,
+        solar_price_gross_eur_per_kwh=0.40,
+        solar_cost_total_gross_eur=8.4,
+        total_cost_total_gross_eur=59.4,
+    )
+
+    current = astra_api.monotonic_reading(provider, previous)
+
+    assert current.grid_cost_total_gross_eur == 31.0
+    assert current.solar_cost_total_gross_eur == 4.4
+    assert current.total_cost_total_gross_eur == 35.4
+
+
+def test_monotonic_reading_preserves_cost_baseline_on_counter_reset() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 6, 21, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=100.0,
+        grid_kwh_total=100.0,
+        solar_kwh_total=20.0,
+        total_kwh=120.0,
+        grid_price_gross_eur_per_kwh=0.30,
+        grid_cost_total_gross_eur=30.0,
+        solar_price_gross_eur_per_kwh=0.20,
+        solar_cost_total_gross_eur=4.0,
+        total_cost_total_gross_eur=34.0,
+    )
+    provider = replace(
+        previous,
+        timestamp=dt.datetime(2026, 6, 22, tzinfo=dt.UTC),
+        imported_kwh_total=90.0,
+        grid_kwh_total=90.0,
+        solar_kwh_total=19.0,
+        total_kwh=109.0,
+        grid_price_gross_eur_per_kwh=0.50,
+        grid_cost_total_gross_eur=45.0,
+        solar_price_gross_eur_per_kwh=0.40,
+        solar_cost_total_gross_eur=7.6,
+        total_cost_total_gross_eur=52.6,
+    )
+
+    current = astra_api.monotonic_reading(provider, previous)
+
+    assert current.grid_kwh_total == 100.0
+    assert current.solar_kwh_total == 20.0
+    assert current.grid_cost_total_gross_eur == 30.0
+    assert current.solar_cost_total_gross_eur == 4.0
+    assert current.total_cost_total_gross_eur == 34.0
 
 
 def test_monotonic_reading_keeps_consistent_provider_reading() -> None:
