@@ -89,8 +89,9 @@ def test_current_reports_safe_fetch_phase_for_unexpected_provider_error() -> Non
 
     session._fetch_meter_widget = broken_fetch  # type: ignore[method-assign]
 
-    with pytest.raises(app.AstraWebError, match="current fetch_widget failed: RuntimeError"):
+    with pytest.raises(RuntimeError, match="provider response must not escape"):
         session.current()
+    assert session._current_phase == "fetch_widget"
 
 
 def test_request_text_classifies_fake_http_failure_without_body() -> None:
@@ -99,11 +100,12 @@ def test_request_text_classifies_fake_http_failure_without_body() -> None:
             raise app.HTTPError(request.full_url, 502, "bad gateway", {}, None)
 
     with pytest.raises(app.AstraWebError, match="web returned HTTP 502"):
-        app.AstraBrowserSession._request_text(
+        app.AstraBrowserSession(app.ProxyConfig())._request_text(
             BrokenOpener(),
             "https://provider.invalid/widget",
             data=None,
             headers={},
+            timeout_seconds=10,
         )
 
 
@@ -113,6 +115,7 @@ def test_fetch_widget_follows_dashboard_widget_route(monkeypatch) -> None:
     class Response:
         def __init__(self, body):
             self.body = body.encode()
+            self.status = 200
 
         def __enter__(self):
             return self
@@ -130,7 +133,7 @@ def test_fetch_widget_follows_dashboard_widget_route(monkeypatch) -> None:
                 return Response('<iframe src="wg_replastzs.php?sessionId=session"></iframe>')
             return Response("Strom VGB 1,00 kWh")
 
-    monkeypatch.setattr(app, "build_opener", lambda: FakeOpener())
+    monkeypatch.setattr(app, "build_opener", lambda *args: FakeOpener())
     session = app.AstraBrowserSession(app.ProxyConfig(web_base_url="https://provider.invalid/base"))
     html = session._fetch_meter_widget("session", "cookie=value")
 

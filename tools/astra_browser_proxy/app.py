@@ -11,11 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import monotonic, perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
-from urllib.request import Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
 ASTRA_TZ = ZoneInfo("Europe/Berlin")
@@ -51,10 +52,52 @@ class ProxyConfig:
     meter_id: str = os.getenv("ASTRA_METER_ID", "astra_meter")
     initial_session_id: str = os.getenv("ASTRA_SESSION_ID", "")
     initial_cookie: str = os.getenv("ASTRA_COOKIE", "")
+    dashboard_timeout_seconds: int = min(
+        max(int(os.getenv("ASTRA_DASHBOARD_TIMEOUT_SECONDS", "10")), 5), 30
+    )
+    widget_timeout_seconds: int = min(
+        max(int(os.getenv("ASTRA_WIDGET_TIMEOUT_SECONDS", "55")), 10), 60
+    )
+    current_cache_seconds: int = min(
+        max(int(os.getenv("ASTRA_CURRENT_CACHE_SECONDS", "30")), 0), 300
+    )
 
 
 class AstraWebError(RuntimeError):
     """Astra web frontend could not provide usable data."""
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise AstraWebError("Astra web URL has an invalid origin")
+    if parsed.username or parsed.password:
+        raise AstraWebError("Astra web URL must not contain credentials")
+    scheme = parsed.scheme.lower()
+    port = parsed.port
+    if port is None and scheme == "https":
+        port = 443
+    elif port is None and scheme == "http":
+        port = 80
+    return scheme, parsed.hostname.lower(), port
+
+
+def _same_origin(url: str, expected: tuple[str, str, int | None]) -> bool:
+    try:
+        return _origin(url) == expected
+    except (AstraWebError, ValueError):
+        return False
+
+
+class _SameOriginRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, expected_origin: tuple[str, str, int | None]) -> None:
+        super().__init__()
+        self._expected_origin = expected_origin
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _same_origin(newurl, self._expected_origin):
+            raise AstraWebError("Astra web redirect crossed the configured origin")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class AstraBrowserSession:
@@ -68,6 +111,9 @@ class AstraBrowserSession:
         self._last_session_id = config.initial_session_id
         self._last_cookie = config.initial_cookie
         self._last_login_attempt: str | None = None
+        self._last_current: dict[str, Any] | None = None
+        self._last_current_at = 0.0
+        self._current_phase = "idle"
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -83,15 +129,24 @@ class AstraBrowserSession:
     def login(self) -> dict[str, Any]:
         with self._lock:
             page = self._ensure_page()
+            navigation_started = perf_counter()
             try:
                 page.goto(self.config.login_url, wait_until="domcontentloaded", timeout=30000)
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning("Astra browser navigation failed: %s", type(err).__name__)
+                LOGGER.warning(
+                    "phase=browser_navigation_failed error_type=%s elapsed_ms=%.1f",
+                    type(err).__name__,
+                    (perf_counter() - navigation_started) * 1000,
+                )
                 raise AstraWebError(
                     f"Astra browser navigation failed: {type(err).__name__}"
                 ) from err
+            LOGGER.info("phase=browser_navigation_done elapsed_ms=%.1f", (perf_counter() - navigation_started) * 1000)
             self._last_login_attempt = datetime.now(ASTRA_TZ).isoformat()
-            if self.config.username and self.config.password:
+            login_origin = _origin(self.config.login_url)
+            if not _same_origin(page.url, login_origin):
+                LOGGER.warning("Astra login navigation crossed the configured origin; autofill skipped")
+            elif self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
             self._capture_browser_session()
             return {
@@ -104,44 +159,61 @@ class AstraBrowserSession:
             }
 
     def current(self) -> dict[str, Any]:
+        started = perf_counter()
         with self._lock:
-            phase = "ensure_page"
-            try:
-                # Start the persistent browser even when a restored cookie/session
-                # is available, so the browser can refresh stale session metadata.
-                self._ensure_page()
-                phase = "capture_session"
+            self._current_phase = "cache_check"
+            if self._last_current is not None and (
+                monotonic() - self._last_current_at < self.config.current_cache_seconds
+            ):
+                LOGGER.info("phase=current_cache_hit age_ms=%.1f", (monotonic() - self._last_current_at) * 1000)
+                return json.loads(json.dumps(self._last_current))
+            # Restored cookies/session IDs still need a live browser context so
+            # stale session metadata can be refreshed safely.
+            self._current_phase = "ensure_page"
+            self._ensure_page()
+            capture_started = perf_counter()
+            self._current_phase = "capture_session"
+            self._capture_browser_session()
+            LOGGER.info("phase=capture_session elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - capture_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
+            if not self._last_cookie or not self._last_session_id:
+                LOGGER.info("phase=login_start")
+                self._current_phase = "login"
+                login_started = perf_counter()
+                self.login()
+                LOGGER.info("phase=login_done elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - login_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
                 self._capture_browser_session()
-                if not self._last_cookie or not self._last_session_id:
-                    phase = "login"
-                    self.login()
-                    self._capture_browser_session()
-                if not self._last_cookie or not self._last_session_id:
-                    raise AstraWebError(
-                        "No logged-in Astra browser session is available; complete login through CDP"
-                    )
-
-                phase = "fetch_widget"
-                html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
-                phase = "parse_widget"
-                meter = parse_meter_widget(
-                    html,
-                    fallback_meter_id=self.config.meter_id,
-                )
-                return {
-                    "ok": True,
-                    "source": "astra_web_widget",
-                    "fetched_at": datetime.now(ASTRA_TZ).isoformat(),
-                    "meter": meter,
-                }
-            except AstraWebError:
-                raise
-            except Exception as err:  # noqa: BLE001
-                # Keep provider details and session material out of the response,
-                # but retain the failing phase and safe exception class in logs/API.
+            if not self._last_cookie or not self._last_session_id:
                 raise AstraWebError(
-                    f"Astra current {phase} failed: {type(err).__name__}"
-                ) from err
+                    "No logged-in Astra browser session is available; complete login through CDP"
+                )
+
+            fetch_started = perf_counter()
+            self._current_phase = "fetch_widget"
+            html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
+            LOGGER.info("phase=widget_fetch_done elapsed_ms=%.1f response_bytes=%s", (perf_counter() - fetch_started) * 1000, len(html.encode("latin-1", errors="ignore")))
+            parse_started = perf_counter()
+            self._current_phase = "parse_widget"
+            meter = parse_meter_widget(
+                html,
+                fallback_meter_id=self.config.meter_id,
+            )
+            LOGGER.info(
+                "phase=parse_done elapsed_ms=%.1f total_elapsed_ms=%.1f",
+                (perf_counter() - parse_started) * 1000,
+                (perf_counter() - started) * 1000,
+            )
+            result = {
+                "ok": True,
+                "source": "astra_web_widget",
+                "fetched_at": datetime.now(ASTRA_TZ).isoformat(),
+                "meter": meter,
+            }
+            # Only successful parsed responses are cached. A failed or empty
+            # response cannot overwrite a known-good result or extend its age.
+            self._last_current = result
+            self._last_current_at = monotonic()
+            self._current_phase = "complete"
+            return json.loads(json.dumps(result))
 
     def _ensure_page(self):
         if self._context is None:
@@ -163,9 +235,6 @@ class AstraBrowserSession:
             try:
                 self._context = launch_persistent_context(self.config.profile_dir, **options)
             except Exception as err:  # noqa: BLE001
-                # A crashed Chromium leaves only these profile lock markers.
-                # Remove those markers, never cookies/session data, and retry
-                # once so a restart can recover the persisted Astra session.
                 self._clear_stale_profile_locks()
                 LOGGER.warning("Astra browser launch retry: %s", type(err).__name__)
                 try:
@@ -205,7 +274,7 @@ class AstraBrowserSession:
                 if locator.count():
                     locator.fill(value, timeout=2000)
             except Exception as err:  # noqa: BLE001
-                LOGGER.debug("Could not fill login selector %s: %s", selector, err)
+                LOGGER.debug("Could not fill login selector %s: %s", selector, type(err).__name__)
                 continue
         for selector in (
             "button[type='submit']",
@@ -220,18 +289,29 @@ class AstraBrowserSession:
                     page.wait_for_load_state("domcontentloaded", timeout=10000)
                     return
             except Exception as err:  # noqa: BLE001
-                LOGGER.debug("Could not click login selector %s: %s", selector, err)
+                LOGGER.debug("Could not click login selector %s: %s", selector, type(err).__name__)
                 continue
 
     def _capture_browser_session(self) -> None:
         if self._context is None:
             return
-        cookies = self._context.cookies()
+        expected_origin = _origin(self.config.web_base_url)
+        try:
+            cookies = self._context.cookies([self.config.web_base_url])
+        except TypeError:
+            cookies = self._context.cookies()
+        cookies = [
+            cookie
+            for cookie in cookies
+            if _cookie_matches_origin(cookie, expected_origin)
+        ]
         if cookies:
             self._last_cookie = "; ".join(
                 f"{cookie['name']}={cookie['value']}" for cookie in cookies
             )
         for page in self._context.pages:
+            if not _same_origin(page.url, expected_origin):
+                continue
             parsed = urlparse(page.url)
             session_id = parse_qs(parsed.query).get("sessionId", [""])[0]
             if session_id:
@@ -239,7 +319,8 @@ class AstraBrowserSession:
                 return
 
     def _fetch_meter_widget(self, session_id: str, cookie: str) -> str:
-        opener = build_opener()
+        expected_origin = _origin(self.config.web_base_url)
+        opener = build_opener(_SameOriginRedirectHandler(expected_origin))
         headers = {
             "User-Agent": "Mozilla/5.0 AstraEnergyBrowserProxy/1.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -254,26 +335,50 @@ class AstraBrowserSession:
                 "s_ver": "3",
             },
             headers=headers,
+            timeout_seconds=self.config.dashboard_timeout_seconds,
         )
         widget_url = _find_widget_url(dashboard, self.config.web_base_url, session_id)
-        return self._request_text(opener, widget_url, data=None, headers=headers)
+        return self._request_text(
+            opener,
+            widget_url,
+            data=None,
+            headers=headers,
+            timeout_seconds=self.config.widget_timeout_seconds,
+        )
 
-    @staticmethod
-    def _request_text(opener, url: str, *, data: dict[str, str] | None, headers: dict[str, str]) -> str:
+    def _request_text(
+        self,
+        opener,
+        url: str,
+        *,
+        data: dict[str, str] | None,
+        headers: dict[str, str],
+        timeout_seconds: int,
+    ) -> str:
         body = urlencode(data).encode() if data is not None else None
         request = Request(url, data=body, headers=headers, method="POST" if body else "GET")
+        request_started = perf_counter()
         try:
-            with opener.open(request, timeout=30) as response:
+            with opener.open(request, timeout=timeout_seconds) as response:
                 raw = response.read()
+                LOGGER.info("phase=http_fetch_done status=%s elapsed_ms=%.1f response_bytes=%s", response.status, (perf_counter() - request_started) * 1000, len(raw))
         except HTTPError as err:
+            LOGGER.warning("phase=http_fetch_failed status=%s elapsed_ms=%.1f", err.code, (perf_counter() - request_started) * 1000)
             raise AstraWebError(f"Astra web returned HTTP {err.code}") from err
         except URLError as err:
-            raise AstraWebError(f"Astra web request failed: {err.reason}") from err
+            LOGGER.warning("phase=http_fetch_failed error=%s elapsed_ms=%.1f", type(err.reason).__name__, (perf_counter() - request_started) * 1000)
+            raise AstraWebError("Astra web request failed") from err
+        except TimeoutError as err:
+            LOGGER.warning("phase=http_fetch_failed error=TimeoutError elapsed_ms=%.1f", (perf_counter() - request_started) * 1000)
+            raise AstraWebError("Astra web request timed out") from err
         text = raw.decode("latin-1", errors="ignore")
         lowered = text.casefold()
         if "recaptcha" in lowered or "g-recaptcha" in lowered:
             raise AstraWebError("Astra returned a reCAPTCHA login page")
-        if "cslogin" in lowered and "passwort" in lowered:
+        if (
+            ("cslogin" in lowered and "passwort" in lowered)
+            or ("<form" in lowered and "password" in lowered and "login" in lowered)
+        ):
             raise AstraWebError("Astra browser session is logged out")
         if not text.strip():
             raise AstraWebError("Astra web returned an empty response")
@@ -283,8 +388,16 @@ class AstraBrowserSession:
 def _find_widget_url(dashboard_html: str, base_url: str, session_id: str) -> str:
     match = re.search(r"""["']([^"']*wg_replastzs\.php[^"']*)["']""", dashboard_html)
     if match:
-        return urljoin(f"{base_url}/", unescape(match.group(1)))
+        widget_url = urljoin(f"{base_url}/", unescape(match.group(1)))
+        if not _same_origin(widget_url, _origin(base_url)):
+            raise AstraWebError("Astra widget URL crossed the configured origin")
+        return widget_url
     return f"{base_url}/wg_replastzs.php?{urlencode({'sessionId': session_id})}"
+
+
+def _cookie_matches_origin(cookie: dict[str, Any], expected: tuple[str, str, int | None]) -> bool:
+    domain = str(cookie.get("domain") or "").lstrip(".").lower()
+    return bool(domain) and domain == expected[1]
 
 
 def parse_meter_widget(html: str, *, fallback_meter_id: str) -> dict[str, Any]:
@@ -405,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
             except AstraWebError as err:
                 self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning("Login request failed: %s", type(err).__name__)
+                LOGGER.warning("Astra login request failed: %s", type(err).__name__)
                 self._send_json(
                     HTTPStatus.BAD_GATEWAY,
                     {"ok": False, "error": f"Astra browser login failed: {type(err).__name__}"},
@@ -420,10 +533,11 @@ class Handler(BaseHTTPRequestHandler):
             LOGGER.warning("Current fetch failed: %s", type(err).__name__)
             self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Current request failed: %s", type(err).__name__)
+            phase = getattr(SESSION, "_current_phase", "unknown")
+            LOGGER.warning("Astra current request failed: phase=%s error_type=%s", phase, type(err).__name__)
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
-                {"ok": False, "error": f"Astra current request failed: {type(err).__name__}"},
+                {"ok": False, "error": f"Astra current request failed: phase={phase} error_type={type(err).__name__}"},
             )
 
     def _authorized(self) -> bool:
@@ -446,7 +560,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if CONFIG.bind != "127.0.0.1" and not CONFIG.shared_token:
         raise RuntimeError("Refusing to start unauthenticated proxy on non-loopback address. Set ASTRA_SHARED_TOKEN or bind to 127.0.0.1.")
-    server = HTTPServer((CONFIG.bind, CONFIG.port), Handler)
+    server = ThreadingHTTPServer((CONFIG.bind, CONFIG.port), Handler)
     LOGGER.info("Starting Astra browser proxy on %s:%s", CONFIG.bind, CONFIG.port)
     server.serve_forever()
 
