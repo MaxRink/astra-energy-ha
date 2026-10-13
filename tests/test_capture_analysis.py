@@ -1830,6 +1830,40 @@ def test_coordinator_browser_proxy_does_not_replace_newer_live_cumulative_state(
     assert result["TEST_TOTAL_0"].total_kwh == 140.0
 
 
+def test_monotonic_reading_keeps_old_new_old_new_sequence_monotonic() -> None:
+    """A stale fallback stand must not create a reset between live readings."""
+    readings = [
+        astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0", meter_name="meter", timestamp=dt.datetime(2026, 10, 11, 19, tzinfo=dt.UTC),
+            power_w=None, imported_kwh_total=6118.145, grid_kwh_total=6118.145,
+            solar_kwh_total=1365.572, total_kwh=7483.717,
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0", meter_name="meter", timestamp=dt.datetime(2026, 10, 11, 22, tzinfo=dt.UTC),
+            power_w=None, imported_kwh_total=5795.351, grid_kwh_total=5795.351,
+            solar_kwh_total=1265.22008803521, total_kwh=7060.57108803521,
+            raw={"source": "recorder_fallback"},
+        ),
+        astra_api.AstraMeterReading(
+            meter_id="TEST_TOTAL_0", meter_name="meter", timestamp=dt.datetime(2026, 10, 11, 23, tzinfo=dt.UTC),
+            power_w=None, imported_kwh_total=6120.815, grid_kwh_total=6120.815,
+            solar_kwh_total=1365.572, total_kwh=7486.387,
+        ),
+    ]
+
+    normalized = []
+    previous = None
+    for reading in readings:
+        current = astra_api.monotonic_reading(reading, previous)
+        normalized.append(current)
+        previous = current
+
+    assert [reading.grid_kwh_total for reading in normalized] == [6118.145] * 2 + [6120.815]
+    assert [reading.total_kwh for reading in normalized] == pytest.approx(
+        [7483.717, 7483.717, 7486.387]
+    )
+
+
 def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     monkeypatch,
 ) -> None:
