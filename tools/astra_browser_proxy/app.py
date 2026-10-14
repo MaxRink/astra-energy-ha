@@ -281,19 +281,27 @@ class AstraBrowserSession:
             route = re.search(r"(?:[\"'])([^\"']*pm_graph\.php[^\"']*)(?:[\"'])", dashboard)
             params = {
                 "sessionId": self._last_session_id,
-                "s_vom": start.strftime("%d.%m.%Y"),
-                "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y"),
+                "s_vom": start.strftime("%d.%m.%Y 00:00:00"),
+                "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00"),
                 "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
                 "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "s_bvom": start.strftime("%Y-%m-%d 00:00:00"),
+                "s_bbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "id": "",
+                "s_prod": "",
+                "s_width": "1600",
+                "s_height": "900",
             }
             if route:
                 observed = parse_qs(urlparse(unescape(route.group(1))).query)
                 params.update({key: values[0] for key, values in observed.items() if values})
                 params["sessionId"] = self._last_session_id
-                params["s_vom"] = start.strftime("%d.%m.%Y")
-                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
+                params["s_vom"] = start.strftime("%d.%m.%Y 00:00:00")
+                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00")
                 params["s_tvom"] = start.strftime("%Y-%m-%d 00:00:00")
                 params["s_tbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+                params["s_bvom"] = start.strftime("%Y-%m-%d 00:00:00")
+                params["s_bbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
                 graph_path = urljoin(f"{self.config.web_base_url}/", unescape(route.group(1))).split("?", 1)[0]
             else:
                 graph_path = f"{self.config.web_base_url}/pm_graph.php"

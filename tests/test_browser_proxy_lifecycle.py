@@ -184,6 +184,36 @@ def test_ensure_page_reattaches_to_active_browser_during_cooldown(monkeypatch) -
     assert session._launch_retry_at == 0.0
 
 
+def test_history_graph_request_includes_provider_date_and_curve_parameters(monkeypatch) -> None:
+    session = app.AstraBrowserSession(
+        app.ProxyConfig(web_base_url="https://astra.example/pm")
+    )
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    session._last_dashboard = "<html>no route</html>"
+    session._last_dashboard_at = app.monotonic()
+    session.current = lambda: {}  # type: ignore[method-assign]
+    captured = []
+
+    def request_text(opener, url, *, data, headers, timeout_seconds):
+        captured.append(url)
+        return '<area TITLE="Strom VGB ist 1,0 kWh um 13.10.2026 00:15:00">'
+
+    session._request_text = request_text  # type: ignore[method-assign]
+
+    result = session.history("2026-10-13")
+
+    assert result["ok"] is True
+    assert len(result["points"]) == 1
+    query = app.parse_qs(app.urlparse(captured[0]).query)
+    assert query["s_vom"] == ["13.10.2026 00:00:00"]
+    assert query["s_bis"] == ["14.10.2026 00:00:00"]
+    assert query["s_bvom"] == ["2026-10-13 00:00:00"]
+    assert query["s_bbis"] == ["2026-10-14 00:00:00"]
+    assert query["s_width"] == ["1600"]
+    assert query["s_height"] == ["900"]
+
+
 def test_capture_session_recovers_once_from_closed_context(monkeypatch, tmp_path) -> None:
     class ClosedContext:
         def cookies(self, *args):
