@@ -48,6 +48,30 @@ def test_report_parser_extracts_only_dated_kwh_rows() -> None:
     ]
 
 
+def test_report_parser_accepts_german_thousands_and_english_decimals() -> None:
+    html = "<tr><td>21.06.2026</td><td>1.234 kWh</td></tr>"
+
+    assert app._parse_report_meter_rows(html, locale="de") == [
+        {"date": "21.06.2026", "kwh": 1234.0},
+    ]
+
+    english_html = "<tr><td>22.06.2026</td><td>9.25 kWh</td></tr>"
+    assert app._parse_report_meter_rows(english_html, locale="en") == [
+        {"date": "22.06.2026", "kwh": 9.25},
+    ]
+
+    grouped_html = "<tr><td>23.06.2026</td><td>1.234.567,89 kWh</td></tr>"
+    assert app._parse_report_meter_rows(grouped_html, locale="de") == [
+        {"date": "23.06.2026", "kwh": 1234567.89},
+    ]
+
+
+def test_report_parser_skips_locale_ambiguous_dot_value() -> None:
+    html = "<tr><td>21.06.2026</td><td>1.234 kWh</td></tr>"
+
+    assert app._parse_report_meter_rows(html) == []
+
+
 def test_report_rejects_unbounded_month() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
     with pytest.raises(app.AstraWebError, match="YYYY-MM"):

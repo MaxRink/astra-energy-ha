@@ -388,7 +388,10 @@ class AstraBrowserSession:
                 "response_bytes": len(html.encode("latin-1", errors="ignore")),
                 "kwh_markers": html.casefold().count("kwh"),
                 "day_markers": len(re.findall(r"\b\d{2}\.\d{2}\.\d{4}\b", html)),
-                "meter_rows": _parse_report_meter_rows(html),
+                # The web session is explicitly German (see the browser
+                # locale above); a dot followed by three digits is therefore
+                # a thousands separator in this provider response.
+                "meter_rows": _parse_report_meter_rows(html, locale="de"),
             }
 
     def _ensure_page(self):
@@ -735,22 +738,42 @@ def _parse_graph_points(html: str) -> list[dict[str, Any]]:
     return points
 
 
-def _parse_report_meter_rows(html: str) -> list[dict[str, Any]]:
+def _parse_report_meter_rows(html: str, *, locale: str | None = None) -> list[dict[str, Any]]:
     """Extract only dated kWh values from a report table, never raw HTML."""
     rows: list[dict[str, Any]] = []
     text = re.sub(r"<[^>]+>", " ", unescape(html))
     pattern = re.compile(
         r"(?P<date>\d{2}\.\d{2}\.\d{4})(?:\s+|[^<]{0,80})"
-        r"(?P<value>\d+(?:[\.,]\d+)?)\s*kWh",
+        r"(?P<value>\d+(?:[\.,]\d+)*(?:[\.,]\d+)?)\s*kWh",
         re.IGNORECASE,
     )
     for match in pattern.finditer(text):
         try:
-            value = float(match.group("value").replace(".", "").replace(",", "."))
+            value = _parse_report_number(match.group("value"), locale=locale)
         except ValueError:
             continue
         rows.append({"date": match.group("date"), "kwh": value})
     return rows[:1000]
+
+
+def _parse_report_number(value: str, *, locale: str | None = None) -> float:
+    """Parse a report number only when its separator semantics are known."""
+    value = value.strip()
+    if "," in value:
+        return float(value.replace(".", "").replace(",", "."))
+    if "." in value:
+        whole, fraction = value.split(".", 1)
+        if value.count(".") > 1:
+            if locale == "en":
+                raise ValueError("multiple decimal separators")
+            return float(value.replace(".", ""))
+        # Reports normally use German thousands separators, but captures from
+        # the provider can contain an English decimal point (for example 9.25).
+        if locale == "de" and len(fraction) == 3 and len(whole) <= 3:
+            return float(whole + fraction)
+        if locale not in {"de", "en"} and len(fraction) == 3:
+            raise ValueError("ambiguous decimal separator")
+    return float(value)
 
 
 def _cookie_matches_origin(cookie: dict[str, Any], expected: tuple[str, str, int | None]) -> bool:
