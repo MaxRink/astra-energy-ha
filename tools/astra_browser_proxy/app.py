@@ -113,6 +113,8 @@ class AstraBrowserSession:
         self._last_login_attempt: str | None = None
         self._last_current: dict[str, Any] | None = None
         self._last_current_at = 0.0
+        self._last_dashboard = ""
+        self._last_dashboard_at = 0.0
         self._current_phase = "idle"
         self._launch_failure_count = 0
         self._launch_retry_at = 0.0
@@ -259,13 +261,19 @@ class AstraBrowserSession:
                 "Cookie": self._last_cookie,
             }
             opener = build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url)))
-            dashboard = self._request_text(
-                opener,
-                f"{self.config.web_base_url}/pm_customlogin.php",
-                data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
-                headers=headers,
-                timeout_seconds=self.config.dashboard_timeout_seconds,
-            )
+            dashboard_age = monotonic() - self._last_dashboard_at
+            if self._last_dashboard and dashboard_age < (
+                self.config.current_cache_seconds + self.config.widget_timeout_seconds
+            ):
+                dashboard = self._last_dashboard
+            else:
+                dashboard = self._request_text(
+                    opener,
+                    f"{self.config.web_base_url}/pm_customlogin.php",
+                    data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
+                    headers=headers,
+                    timeout_seconds=self.config.widget_timeout_seconds,
+                )
             route = re.search(r"(?:[\"'])([^\"']*pm_graph\.php[^\"']*)(?:[\"'])", dashboard)
             params = {
                 "sessionId": self._last_session_id,
@@ -493,6 +501,8 @@ class AstraBrowserSession:
             headers=headers,
             timeout_seconds=self.config.dashboard_timeout_seconds,
         )
+        self._last_dashboard = dashboard
+        self._last_dashboard_at = monotonic()
         widget_url = _find_widget_url(dashboard, self.config.web_base_url, session_id)
         return self._request_text(
             opener,
