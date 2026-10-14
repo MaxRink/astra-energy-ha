@@ -31,6 +31,15 @@ def test_graph_parser_preserves_timestamp_and_separates_cumulative_interval() ->
     ]
 
 
+def test_graph_parser_rejects_provider_zero_placeholder() -> None:
+    html = (
+        '<area TITLE="Strom VGB ist 0,0 kWh um 13.10.2026 00:00:00">'
+        '<area TITLE="Strom VGB ist 0,0 kWh um 14.10.2026 00:00:00">'
+    )
+
+    assert app._parse_graph_points(html) == []
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 

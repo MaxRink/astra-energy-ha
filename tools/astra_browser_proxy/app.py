@@ -651,6 +651,14 @@ def _parse_graph_points(html: str) -> list[dict[str, Any]]:
                 "cumulative_kwh": max(positive),
                 "interval_kwh": min(positive),
             })
+    # Astra renders a two-row zero graph when the selected day has no
+    # available curve data. Treat that response as missing rather than
+    # importing synthetic zero consumption into Home Assistant history.
+    if points and all(
+        point["cumulative_kwh"] == 0.0 and point["interval_kwh"] == 0.0
+        for point in points
+    ):
+        return []
     return points
 
 
