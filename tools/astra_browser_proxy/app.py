@@ -333,25 +333,27 @@ class AstraBrowserSession:
                     "--disable-http2",
                 ],
             )
+            context = None
             try:
-                self._context = launch_persistent_context(self.config.profile_dir, **options)
+                context = launch_persistent_context(self.config.profile_dir, **options)
             except Exception as err:  # noqa: BLE001
                 if not self._profile_has_active_browser():
                     self._clear_stale_profile_locks()
                     try:
-                        self._context = launch_persistent_context(self.config.profile_dir, **options)
+                        context = launch_persistent_context(self.config.profile_dir, **options)
                     except Exception as retry_err:  # noqa: BLE001
                         err = retry_err
                     else:
                         self._launch_failure_count = 0
                         self._launch_retry_at = 0.0
-                if self._context is None:
+                if context is None:
                     self._launch_failure_count += 1
                     delay = min(1800.0, 300.0 * (2 ** min(self._launch_failure_count - 1, 3)))
                     self._launch_retry_at = monotonic() + delay
                     raise AstraWebError(
                         f"Astra browser launch failed: {type(err).__name__}"
                     ) from err
+            self._context = context
             self._launch_failure_count = 0
             self._launch_retry_at = 0.0
         pages = self._context.pages
