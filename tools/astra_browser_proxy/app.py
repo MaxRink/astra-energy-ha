@@ -349,7 +349,31 @@ class AstraBrowserSession:
                 "s_gtz": "0",
                 "sessionId": self._last_session_id,
             }
-            url = f"{self.config.web_base_url}/pm_repeaverbr.php?{urlencode(params)}"
+            dashboard = self._last_dashboard
+            if not dashboard:
+                dashboard = self._request_text(
+                    opener,
+                    f"{self.config.web_base_url}/pm_customlogin.php",
+                    data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
+                    headers=headers,
+                    timeout_seconds=self.config.widget_timeout_seconds,
+                )
+            report_route = re.search(
+                r"(?:[\"'])([^\"']*pm_repeaverbr\.php[^\"']*)(?:[\"'])",
+                dashboard,
+            )
+            if report_route:
+                observed = parse_qs(urlparse(unescape(report_route.group(1))).query)
+                params.update({key: values[0] for key, values in observed.items() if values})
+                params["sessionId"] = self._last_session_id
+                params["Report"] = "4"
+                params["s_year"] = str(year)
+                params["s_fday"] = f"{month_number:02d}"
+                params["s_gtz"] = "0"
+                report_path = urljoin(f"{self.config.web_base_url}/", unescape(report_route.group(1))).split("?", 1)[0]
+            else:
+                report_path = f"{self.config.web_base_url}/pm_repeaverbr.php"
+            url = f"{report_path}?{urlencode(params)}"
             html = self._request_text(
                 opener,
                 url,

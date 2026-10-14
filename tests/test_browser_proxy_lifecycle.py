@@ -54,6 +54,28 @@ def test_report_rejects_unbounded_month() -> None:
         session.report("../../etc")
 
 
+def test_report_route_uses_dashboard_context(monkeypatch) -> None:
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session.current = lambda: {"ok": True}  # type: ignore[method-assign]
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    session._last_dashboard = (
+        '<a href="pm_repeaverbr.php?C_IMMOID=home&C_USER=user&Report=4&'
+        'prnr=42&prnr1=43&s_fday=06&s_gtz=0&s_year=2026">report</a>'
+    )
+    captured = {}
+
+    def request(*args, **kwargs):
+        captured["url"] = args[1]
+        return "<html>21.06.2026 12,5 kWh</html>"
+
+    session._request_text = request  # type: ignore[method-assign]
+    result = session.report("2026-06")
+    assert result["meter_rows"] == [{"date": "21.06.2026", "kwh": 12.5}]
+    assert "C_IMMOID=home" in captured["url"]
+    assert "prnr1=43" in captured["url"]
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 
