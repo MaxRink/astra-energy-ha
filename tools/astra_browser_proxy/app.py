@@ -108,6 +108,10 @@ class AstraBrowserSession:
         self._lock = threading.RLock()
         self._context = None
         self._page = None
+        # Keep the Playwright driver alive when recovering an orphaned browser
+        # through CDP.  A CDP-attached context is owned by this driver rather
+        # than by CloakBrowser's launch helper.
+        self._cdp_playwright = None
         self._last_session_id = config.initial_session_id
         self._last_cookie = config.initial_cookie
         self._last_login_attempt: str | None = None
@@ -325,49 +329,98 @@ class AstraBrowserSession:
         if self._context is None:
             now = monotonic()
             if now < self._launch_retry_at:
-                raise AstraWebError("Astra browser launch is cooling down")
-            try:
-                from cloakbrowser import launch_persistent_context
-            except ImportError as err:
-                raise AstraWebError("CloakBrowser is not installed in the sidecar") from err
-            os.makedirs(self.config.profile_dir, exist_ok=True)
-            options = dict(
-                headless=self.config.headless,
-                locale="de-DE",
-                timezone="Europe/Berlin",
-                args=[
-                    "--remote-debugging-port=9222",
-                    "--remote-debugging-address=127.0.0.1",
-                    "--disable-http2",
-                ],
-            )
-            context = None
-            try:
-                context = launch_persistent_context(self.config.profile_dir, **options)
-            except Exception as err:  # noqa: BLE001
-                if not self._profile_has_active_browser():
-                    self._clear_stale_profile_locks()
-                    try:
-                        context = launch_persistent_context(self.config.profile_dir, **options)
-                    except Exception as retry_err:  # noqa: BLE001
-                        err = retry_err
+                # A previous launch may have lost its Playwright transport
+                # while Chromium itself stayed alive.  Reattach to that exact
+                # browser before honoring the cooldown; launching another
+                # persistent context against the same profile is unsafe.
+                context = (
+                    self._connect_existing_browser()
+                    if self._profile_has_active_browser()
+                    else None
+                )
+                if context is not None:
+                    self._context = context
+                    self._page = None
+                    self._launch_failure_count = 0
+                    self._launch_retry_at = 0.0
+                else:
+                    raise AstraWebError("Astra browser launch is cooling down")
+            if self._context is None:
+                try:
+                    from cloakbrowser import launch_persistent_context
+                except ImportError as err:
+                    raise AstraWebError("CloakBrowser is not installed in the sidecar") from err
+                os.makedirs(self.config.profile_dir, exist_ok=True)
+                options = dict(
+                    headless=self.config.headless,
+                    locale="de-DE",
+                    timezone="Europe/Berlin",
+                    args=[
+                        "--remote-debugging-port=9222",
+                        "--remote-debugging-address=127.0.0.1",
+                        "--disable-http2",
+                    ],
+                )
+                context = None
+                try:
+                    context = launch_persistent_context(self.config.profile_dir, **options)
+                except Exception as err:  # noqa: BLE001
+                    if self._profile_has_active_browser():
+                        context = self._connect_existing_browser()
+                        if context is not None:
+                            self._context = context
+                            self._page = None
+                            self._launch_failure_count = 0
+                            self._launch_retry_at = 0.0
+                            pages = self._context.pages
+                            self._page = pages[0] if pages else self._context.new_page()
+                            return self._page
                     else:
-                        self._launch_failure_count = 0
-                        self._launch_retry_at = 0.0
-                if context is None:
-                    self._launch_failure_count += 1
-                    delay = min(1800.0, 300.0 * (2 ** min(self._launch_failure_count - 1, 3)))
-                    self._launch_retry_at = monotonic() + delay
-                    raise AstraWebError(
-                        f"Astra browser launch failed: {type(err).__name__}"
-                    ) from err
-            self._context = context
-            self._launch_failure_count = 0
-            self._launch_retry_at = 0.0
+                        self._clear_stale_profile_locks()
+                        try:
+                            context = launch_persistent_context(self.config.profile_dir, **options)
+                        except Exception as retry_err:  # noqa: BLE001
+                            err = retry_err
+                        else:
+                            self._launch_failure_count = 0
+                            self._launch_retry_at = 0.0
+                    if context is None:
+                        self._launch_failure_count += 1
+                        delay = min(1800.0, 300.0 * (2 ** min(self._launch_failure_count - 1, 3)))
+                        self._launch_retry_at = monotonic() + delay
+                        raise AstraWebError(
+                            f"Astra browser launch failed: {type(err).__name__}"
+                        ) from err
+                self._context = context
+                self._launch_failure_count = 0
+                self._launch_retry_at = 0.0
         pages = self._context.pages
         if self._page is None:
             self._page = pages[0] if pages else self._context.new_page()
         return self._page
+
+    def _connect_existing_browser(self):
+        """Attach to an already-running Chromium after a lost Playwright transport."""
+        driver = None
+        try:
+            from playwright.sync_api import sync_playwright
+
+            driver = sync_playwright().start()
+            browser = driver.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            contexts = browser.contexts
+            if not contexts:
+                driver.stop()
+                return None
+            self._cdp_playwright = driver
+            return contexts[0]
+        except Exception as err:  # noqa: BLE001
+            if driver is not None:
+                try:
+                    driver.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            LOGGER.warning("Could not reattach to existing Astra browser: %s", type(err).__name__)
+            return None
 
     def _profile_has_active_browser(self) -> bool:
         marker = f"--user-data-dir={os.path.realpath(self.config.profile_dir)}"
@@ -403,6 +456,12 @@ class AstraBrowserSession:
                 context.close()
             except Exception as err:  # noqa: BLE001
                 LOGGER.debug("Could not close stale Astra browser context: %s", type(err).__name__)
+        if self._cdp_playwright is not None:
+            try:
+                self._cdp_playwright.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._cdp_playwright = None
 
     def _clear_stale_profile_locks(self) -> None:
         for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):

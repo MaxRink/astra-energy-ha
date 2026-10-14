@@ -142,6 +142,48 @@ def test_ensure_page_recreates_closed_browser_context(monkeypatch, tmp_path) -> 
     assert session._context.__class__ is FreshContext
 
 
+def test_ensure_page_reattaches_to_active_browser_during_cooldown(monkeypatch) -> None:
+    class Context:
+        pages = []
+
+        def new_page(self):
+            return object()
+
+    class Browser:
+        contexts = [Context()]
+
+    class Chromium:
+        def connect_over_cdp(self, endpoint):
+            assert endpoint == "http://127.0.0.1:9222"
+            return Browser()
+
+    class Driver:
+        chromium = Chromium()
+
+        def stop(self):
+            return None
+
+    class Playwright:
+        def start(self):
+            return Driver()
+
+    monkeypatch.setitem(sys.modules, "playwright", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        SimpleNamespace(sync_playwright=lambda: Playwright()),
+    )
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    session._launch_retry_at = app.monotonic() + 300
+    session._profile_has_active_browser = lambda: True  # type: ignore[method-assign]
+
+    page = session._ensure_page()
+
+    assert page is not None
+    assert session._context is not None
+    assert session._launch_retry_at == 0.0
+
+
 def test_capture_session_recovers_once_from_closed_context(monkeypatch, tmp_path) -> None:
     class ClosedContext:
         def cookies(self, *args):
