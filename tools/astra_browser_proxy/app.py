@@ -318,6 +318,55 @@ class AstraBrowserSession:
                 raise AstraWebError("Astra history graph contained no timestamped intervals")
             return {"ok": True, "source": "astra_web_graph", "date": day, "points": points}
 
+    def report(self, month: str) -> dict[str, Any]:
+        """Read one documented monthly report through the active web session.
+
+        The month is deliberately the only caller-controlled input.  This keeps
+        the endpoint useful for bounded recovery checks without turning the
+        browser session into a generic authenticated URL proxy.
+        """
+        try:
+            year, month_number = (int(part) for part in month.split("-", 1))
+            if len(month) != 7 or month[4] != "-" or not 1 <= month_number <= 12:
+                raise ValueError
+            selected = date(year, month_number, 1)
+        except (TypeError, ValueError) as err:
+            raise AstraWebError("report month must be YYYY-MM") from err
+        if selected < date(2020, 1, 1) or selected > date.today().replace(day=1):
+            raise AstraWebError("report month is outside the supported range")
+        with self._lock:
+            self.current()
+            headers = {
+                "User-Agent": "Mozilla/5.0 AstraEnergyBrowserProxy/1.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Cookie": self._last_cookie,
+            }
+            opener = build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url)))
+            params = {
+                "Report": "4",
+                "s_year": str(year),
+                "s_fday": f"{month_number:02d}",
+                "s_gtz": "0",
+                "sessionId": self._last_session_id,
+            }
+            url = f"{self.config.web_base_url}/pm_repeaverbr.php?{urlencode(params)}"
+            html = self._request_text(
+                opener,
+                url,
+                data=None,
+                headers=headers,
+                timeout_seconds=self.config.widget_timeout_seconds,
+            )
+            return {
+                "ok": True,
+                "source": "astra_web_monthly_report",
+                "month": month,
+                "response_bytes": len(html.encode("latin-1", errors="ignore")),
+                "kwh_markers": html.casefold().count("kwh"),
+                "day_markers": len(re.findall(r"\b\d{2}\.\d{2}\.\d{4}\b", html)),
+                "meter_rows": _parse_report_meter_rows(html),
+            }
+
     def _ensure_page(self):
         if self._context is not None:
             try:
@@ -662,6 +711,24 @@ def _parse_graph_points(html: str) -> list[dict[str, Any]]:
     return points
 
 
+def _parse_report_meter_rows(html: str) -> list[dict[str, Any]]:
+    """Extract only dated kWh values from a report table, never raw HTML."""
+    rows: list[dict[str, Any]] = []
+    text = re.sub(r"<[^>]+>", " ", unescape(html))
+    pattern = re.compile(
+        r"(?P<date>\d{2}\.\d{2}\.\d{4})(?:\s+|[^<]{0,80})"
+        r"(?P<value>\d+(?:[\.,]\d+)?)\s*kWh",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(text):
+        try:
+            value = float(match.group("value").replace(".", "").replace(",", "."))
+        except ValueError:
+            continue
+        rows.append({"date": match.group("date"), "kwh": value})
+    return rows[:1000]
+
+
 def _cookie_matches_origin(cookie: dict[str, Any], expected: tuple[str, str, int | None]) -> bool:
     domain = str(cookie.get("domain") or "").lstrip(".").lower()
     return bool(domain) and domain == expected[1]
@@ -776,6 +843,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/history"):
             self._handle_history()
             return
+        if self.path.startswith("/report"):
+            self._handle_report()
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -823,6 +893,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
                 {"ok": False, "error": f"Astra history request failed: {type(err).__name__}"},
+            )
+
+    def _handle_report(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        month = (query.get("month") or [""])[0]
+        try:
+            self._send_json(HTTPStatus.OK, SESSION.report(month))
+        except AstraWebError as err:
+            LOGGER.warning("Report fetch failed: %s", type(err).__name__)
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning("Astra report request failed: error_type=%s", type(err).__name__)
+            self._send_json(
+                HTTPStatus.BAD_GATEWAY,
+                {"ok": False, "error": f"Astra report request failed: {type(err).__name__}"},
             )
 
     def _authorized(self) -> bool:

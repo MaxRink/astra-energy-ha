@@ -40,6 +40,20 @@ def test_graph_parser_rejects_provider_zero_placeholder() -> None:
     assert app._parse_graph_points(html) == []
 
 
+def test_report_parser_extracts_only_dated_kwh_rows() -> None:
+    html = "<tr><td>21.06.2026</td><td>12,5 kWh</td></tr><tr><td>22.06.2026</td><td>9.25 kWh</td></tr>"
+    assert app._parse_report_meter_rows(html) == [
+        {"date": "21.06.2026", "kwh": 12.5},
+        {"date": "22.06.2026", "kwh": 9.25},
+    ]
+
+
+def test_report_rejects_unbounded_month() -> None:
+    session = app.AstraBrowserSession(app.ProxyConfig())
+    with pytest.raises(app.AstraWebError, match="YYYY-MM"):
+        session.report("../../etc")
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 
