@@ -114,6 +114,8 @@ class AstraBrowserSession:
         self._last_current: dict[str, Any] | None = None
         self._last_current_at = 0.0
         self._current_phase = "idle"
+        self._launch_failure_count = 0
+        self._launch_retry_at = 0.0
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -132,6 +134,8 @@ class AstraBrowserSession:
                 "has_session_id": bool(self._last_session_id),
                 "last_login_attempt": self._last_login_attempt,
                 "profile_dir": self.config.profile_dir,
+                "launch_failure_count": self._launch_failure_count,
+                "launch_cooldown_remaining_seconds": max(0.0, self._launch_retry_at - monotonic()),
             }
 
     def login(self) -> dict[str, Any]:
@@ -311,6 +315,9 @@ class AstraBrowserSession:
                     self._page = pages[0] if pages else self._context.new_page()
                 return self._page
         if self._context is None:
+            now = monotonic()
+            if now < self._launch_retry_at:
+                raise AstraWebError("Astra browser launch is cooling down")
             try:
                 from cloakbrowser import launch_persistent_context
             except ImportError as err:
@@ -329,18 +336,53 @@ class AstraBrowserSession:
             try:
                 self._context = launch_persistent_context(self.config.profile_dir, **options)
             except Exception as err:  # noqa: BLE001
-                self._clear_stale_profile_locks()
-                LOGGER.warning("Astra browser launch retry: %s", type(err).__name__)
-                try:
-                    self._context = launch_persistent_context(self.config.profile_dir, **options)
-                except Exception as retry_err:  # noqa: BLE001
+                if not self._profile_has_active_browser():
+                    self._clear_stale_profile_locks()
+                    try:
+                        self._context = launch_persistent_context(self.config.profile_dir, **options)
+                    except Exception as retry_err:  # noqa: BLE001
+                        err = retry_err
+                    else:
+                        self._launch_failure_count = 0
+                        self._launch_retry_at = 0.0
+                if self._context is None:
+                    self._launch_failure_count += 1
+                    delay = min(1800.0, 300.0 * (2 ** min(self._launch_failure_count - 1, 3)))
+                    self._launch_retry_at = monotonic() + delay
                     raise AstraWebError(
-                        f"Astra browser launch failed: {type(retry_err).__name__}"
-                    ) from retry_err
+                        f"Astra browser launch failed: {type(err).__name__}"
+                    ) from err
+            self._launch_failure_count = 0
+            self._launch_retry_at = 0.0
         pages = self._context.pages
         if self._page is None:
             self._page = pages[0] if pages else self._context.new_page()
         return self._page
+
+    def _profile_has_active_browser(self) -> bool:
+        marker = f"--user-data-dir={os.path.realpath(self.config.profile_dir)}"
+        try:
+            names = os.listdir("/proc")
+        except OSError:
+            # The sidecar runs on Linux; test and developer hosts may not
+            # expose /proc, where no container browser can be observed.
+            return False
+        for name in names:
+            if not name.isdigit():
+                continue
+            try:
+                state = open(os.path.join("/proc", name, "stat"), encoding="utf-8").read()
+                if ") Z " in state:
+                    continue
+                command = open(os.path.join("/proc", name, "cmdline"), "rb").read().replace(b"\x00", b" ").decode(errors="ignore")
+            except OSError:
+                continue
+            argv = command.split()
+            executable = os.path.basename(argv[0]) if argv else ""
+            is_chromium = executable in {"chrome", "chromium", "chromium-browser"}
+            if marker in command and is_chromium:
+                return True
+        return False
 
     def _invalidate_context(self) -> None:
         context = self._context
