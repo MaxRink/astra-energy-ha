@@ -412,6 +412,16 @@ def monotonic_reading(
     consumption, so the public cumulative counters must stay monotonic. Raw
     provider values remain visible through unsmoothed diagnostics and attributes.
     """
+    # Browser/native responses can arrive out of order while the provider is
+    # refreshing. A stale sample with a larger counter must not be accepted as
+    # new consumption.
+    if (
+        previous is not None
+        and reading.timestamp is not None
+        and previous.timestamp is not None
+        and reading.timestamp < previous.timestamp
+    ):
+        return previous
     grid = _max_present(
         reading.grid_kwh_total,
         reading.imported_kwh_total,

@@ -1864,6 +1864,36 @@ def test_monotonic_reading_keeps_old_new_old_new_sequence_monotonic() -> None:
     )
 
 
+def test_monotonic_reading_rejects_late_stale_sample_with_larger_counter() -> None:
+    """A delayed provider response must not inflate the public counter."""
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 10, 12, 12, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6100.0,
+        grid_kwh_total=6100.0,
+        solar_kwh_total=1300.0,
+        total_kwh=7400.0,
+    )
+    stale = astra_api.AstraMeterReading(
+        meter_id="meter",
+        meter_name="Astra Energy Meter",
+        timestamp=dt.datetime(2026, 10, 12, 8, tzinfo=dt.UTC),
+        power_w=None,
+        imported_kwh_total=6426.0,
+        grid_kwh_total=6426.0,
+        solar_kwh_total=1400.0,
+        total_kwh=7826.0,
+    )
+
+    accepted = astra_api.monotonic_reading(stale, previous)
+
+    assert accepted is previous
+    assert accepted.total_kwh == 7400.0
+    assert accepted.timestamp == dt.datetime(2026, 10, 12, 12, tzinfo=dt.UTC)
+
+
 def test_coordinator_rejects_browser_proxy_catchup_without_elapsed_time(
     monkeypatch,
 ) -> None:
