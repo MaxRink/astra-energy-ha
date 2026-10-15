@@ -61,9 +61,6 @@ class ProxyConfig:
     current_cache_seconds: int = min(
         max(int(os.getenv("ASTRA_CURRENT_CACHE_SECONDS", "30")), 0), 300
     )
-    session_refresh_seconds: int = min(
-        max(int(os.getenv("ASTRA_SESSION_REFRESH_SECONDS", "3600")), 30), 3600
-    )
 
 
 class AstraWebError(RuntimeError):
@@ -111,13 +108,20 @@ class AstraBrowserSession:
         self._lock = threading.RLock()
         self._context = None
         self._page = None
+        # Keep the Playwright driver alive when recovering an orphaned browser
+        # through CDP.  A CDP-attached context is owned by this driver rather
+        # than by CloakBrowser's launch helper.
+        self._cdp_playwright = None
         self._last_session_id = config.initial_session_id
         self._last_cookie = config.initial_cookie
         self._last_login_attempt: str | None = None
         self._last_current: dict[str, Any] | None = None
         self._last_current_at = 0.0
+        self._last_dashboard = ""
+        self._last_dashboard_at = 0.0
         self._current_phase = "idle"
-        self._last_session_capture_at = 0.0
+        self._launch_failure_count = 0
+        self._launch_retry_at = 0.0
 
     def health(self) -> dict[str, Any]:
         # Do not hold the browser-operation lock while probing the context.
@@ -131,6 +135,8 @@ class AstraBrowserSession:
             has_cookie = bool(self._last_cookie)
             has_session_id = bool(self._last_session_id)
             last_login_attempt = self._last_login_attempt
+            launch_failure_count = self._launch_failure_count
+            launch_retry_at = self._launch_retry_at
         finally:
             if acquired:
                 self._lock.release()
@@ -149,6 +155,8 @@ class AstraBrowserSession:
             "has_session_id": has_session_id,
             "last_login_attempt": last_login_attempt,
             "profile_dir": self.config.profile_dir,
+            "launch_failure_count": launch_failure_count,
+            "launch_cooldown_remaining_seconds": max(0.0, launch_retry_at - monotonic()),
         }
 
     def login(self) -> dict[str, Any]:
@@ -157,7 +165,7 @@ class AstraBrowserSession:
             navigation_started = perf_counter()
             try:
                 page.goto(self.config.login_url, wait_until="domcontentloaded", timeout=30000)
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 LOGGER.warning(
                     "phase=browser_navigation_failed error_type=%s elapsed_ms=%.1f",
                     type(err).__name__,
@@ -174,7 +182,6 @@ class AstraBrowserSession:
             elif self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
             self._capture_browser_session()
-            self._last_session_capture_at = monotonic()
             return {
                 "ok": True,
                 "url": _redact_url(page.url),
@@ -193,22 +200,25 @@ class AstraBrowserSession:
             ):
                 LOGGER.info("phase=current_cache_hit age_ms=%.1f", (monotonic() - self._last_current_at) * 1000)
                 return json.loads(json.dumps(self._last_current))
+            # Restored cookies/session IDs still need a live browser context so
+            # stale session metadata can be refreshed safely.
+            self._current_phase = "ensure_page"
+            self._ensure_page()
             capture_started = perf_counter()
             self._current_phase = "capture_session"
-            should_capture = (
-                not self._last_session_capture_at
-                or not self._last_cookie
-                or not self._last_session_id
-                or monotonic() - self._last_session_capture_at
-                >= self.config.session_refresh_seconds
-            )
-            if should_capture:
-                self._refresh_browser_session()
-            else:
-                LOGGER.info(
-                    "phase=capture_session_skipped age_s=%.1f",
-                    monotonic() - self._last_session_capture_at,
+            try:
+                self._capture_browser_session()
+            except AstraWebError as err:
+                # A crashed browser context can retain truthy cookie/session
+                # metadata while every Playwright operation fails. Recreate
+                # it once so a normal refresh can recover without exposing
+                # provider credentials or hammering the login endpoint.
+                LOGGER.warning(
+                    "phase=capture_session_recover error_type=%s",
+                    type(err).__name__,
                 )
+                self._ensure_page()
+                self._capture_browser_session()
             LOGGER.info("phase=capture_session elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - capture_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
             if not self._last_cookie or not self._last_session_id:
                 LOGGER.info("phase=login_start")
@@ -224,26 +234,7 @@ class AstraBrowserSession:
 
             fetch_started = perf_counter()
             self._current_phase = "fetch_widget"
-            try:
-                html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
-            except AstraWebError as err:
-                cause = err.__cause__
-                rejected = (
-                    isinstance(cause, HTTPError) and cause.code in (401, 403)
-                ) or str(err) == "Astra browser session is logged out"
-                if not rejected:
-                    raise
-                # Refresh a rejected cached session once, not on provider
-                # outages, timeouts or CAPTCHA challenges.
-                self._last_session_capture_at = 0.0
-                if should_capture:
-                    raise
-                self._refresh_browser_session()
-                try:
-                    html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
-                except AstraWebError:
-                    self._last_session_capture_at = 0.0
-                    raise
+            html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
             LOGGER.info("phase=widget_fetch_done elapsed_ms=%.1f response_bytes=%s", (perf_counter() - fetch_started) * 1000, len(html.encode("latin-1", errors="ignore")))
             parse_started = perf_counter()
             self._current_phase = "parse_widget"
@@ -269,20 +260,6 @@ class AstraBrowserSession:
             self._current_phase = "complete"
             return json.loads(json.dumps(result))
 
-    def _refresh_browser_session(self) -> None:
-        self._current_phase = "ensure_page"
-        try:
-            self._ensure_page()
-            self._capture_browser_session()
-        except AstraWebError as err:
-            LOGGER.warning(
-                "phase=capture_session_recover error_type=%s",
-                type(err).__name__,
-            )
-            self._ensure_page()
-            self._capture_browser_session()
-        self._last_session_capture_at = monotonic()
-
     def history(self, day: str) -> dict[str, Any]:
         """Read one provider day as timestamped graph intervals.
 
@@ -303,29 +280,43 @@ class AstraBrowserSession:
                 "Cookie": self._last_cookie,
             }
             opener = build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url)))
-            dashboard = self._request_text(
-                opener,
-                f"{self.config.web_base_url}/pm_customlogin.php",
-                data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
-                headers=headers,
-                timeout_seconds=self.config.dashboard_timeout_seconds,
-            )
+            dashboard_age = monotonic() - self._last_dashboard_at
+            if self._last_dashboard and dashboard_age < (
+                self.config.current_cache_seconds + self.config.widget_timeout_seconds
+            ):
+                dashboard = self._last_dashboard
+            else:
+                dashboard = self._request_text(
+                    opener,
+                    f"{self.config.web_base_url}/pm_customlogin.php",
+                    data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
+                    headers=headers,
+                    timeout_seconds=self.config.widget_timeout_seconds,
+                )
             route = re.search(r"(?:[\"'])([^\"']*pm_graph\.php[^\"']*)(?:[\"'])", dashboard)
             params = {
                 "sessionId": self._last_session_id,
-                "s_vom": start.strftime("%d.%m.%Y"),
-                "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y"),
+                "s_vom": start.strftime("%d.%m.%Y 00:00:00"),
+                "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00"),
                 "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
                 "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "s_bvom": start.strftime("%Y-%m-%d 00:00:00"),
+                "s_bbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+                "id": "",
+                "s_prod": "",
+                "s_width": "1600",
+                "s_height": "900",
             }
             if route:
                 observed = parse_qs(urlparse(unescape(route.group(1))).query)
                 params.update({key: values[0] for key, values in observed.items() if values})
                 params["sessionId"] = self._last_session_id
-                params["s_vom"] = start.strftime("%d.%m.%Y")
-                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
+                params["s_vom"] = start.strftime("%d.%m.%Y 00:00:00")
+                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00")
                 params["s_tvom"] = start.strftime("%Y-%m-%d 00:00:00")
                 params["s_tbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+                params["s_bvom"] = start.strftime("%Y-%m-%d 00:00:00")
+                params["s_bbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
                 graph_path = urljoin(f"{self.config.web_base_url}/", unescape(route.group(1))).split("?", 1)[0]
             else:
                 graph_path = f"{self.config.web_base_url}/pm_graph.php"
@@ -341,6 +332,79 @@ class AstraBrowserSession:
             if not points:
                 raise AstraWebError("Astra history graph contained no timestamped intervals")
             return {"ok": True, "source": "astra_web_graph", "date": day, "points": points}
+
+    def report(self, month: str) -> dict[str, Any]:
+        """Read one documented monthly report through the active web session.
+
+        The month is deliberately the only caller-controlled input.  This keeps
+        the endpoint useful for bounded recovery checks without turning the
+        browser session into a generic authenticated URL proxy.
+        """
+        try:
+            year, month_number = (int(part) for part in month.split("-", 1))
+            if len(month) != 7 or month[4] != "-" or not 1 <= month_number <= 12:
+                raise ValueError
+            selected = date(year, month_number, 1)
+        except (TypeError, ValueError) as err:
+            raise AstraWebError("report month must be YYYY-MM") from err
+        if selected < date(2020, 1, 1) or selected > date.today().replace(day=1):
+            raise AstraWebError("report month is outside the supported range")
+        with self._lock:
+            self.current()
+            headers = {
+                "User-Agent": "Mozilla/5.0 AstraEnergyBrowserProxy/1.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Cookie": self._last_cookie,
+            }
+            opener = build_opener(_SameOriginRedirectHandler(_origin(self.config.web_base_url)))
+            params = {
+                "Report": "4",
+                "s_year": str(year),
+                "s_fday": f"{month_number:02d}",
+                "s_gtz": "0",
+                "sessionId": self._last_session_id,
+            }
+            dashboard = self._last_dashboard
+            if not dashboard:
+                dashboard = self._request_text(
+                    opener,
+                    f"{self.config.web_base_url}/pm_customlogin.php",
+                    data={"sessionId": self._last_session_id, "s_stat": "1", "s_ver": "3"},
+                    headers=headers,
+                    timeout_seconds=self.config.widget_timeout_seconds,
+                )
+            report_route = re.search(
+                r"(?:[\"'])([^\"']*pm_repeaverbr\.php[^\"']*)(?:[\"'])",
+                dashboard,
+            )
+            if report_route:
+                observed = parse_qs(urlparse(unescape(report_route.group(1))).query)
+                params.update({key: values[0] for key, values in observed.items() if values})
+                params["sessionId"] = self._last_session_id
+                params["Report"] = "4"
+                params["s_year"] = str(year)
+                params["s_fday"] = f"{month_number:02d}"
+                params["s_gtz"] = "0"
+                report_path = urljoin(f"{self.config.web_base_url}/", unescape(report_route.group(1))).split("?", 1)[0]
+            else:
+                report_path = f"{self.config.web_base_url}/pm_repeaverbr.php"
+            url = f"{report_path}?{urlencode(params)}"
+            html = self._request_text(
+                opener,
+                url,
+                data=None,
+                headers=headers,
+                timeout_seconds=self.config.widget_timeout_seconds,
+            )
+            return {
+                "ok": True,
+                "source": "astra_web_monthly_report",
+                "month": month,
+                "response_bytes": len(html.encode("latin-1", errors="ignore")),
+                "kwh_markers": html.casefold().count("kwh"),
+                "day_markers": len(re.findall(r"\b\d{2}\.\d{2}\.\d{4}\b", html)),
+                "meter_rows": _parse_report_meter_rows(html),
+            }
 
     def _ensure_page(self):
         if self._context is not None:
@@ -359,36 +423,125 @@ class AstraBrowserSession:
                     self._page = pages[0] if pages else self._context.new_page()
                 return self._page
         if self._context is None:
-            try:
-                from cloakbrowser import launch_persistent_context
-            except ImportError as err:
-                raise AstraWebError("CloakBrowser is not installed in the sidecar") from err
-            os.makedirs(self.config.profile_dir, exist_ok=True)
-            options = {
-                "headless": self.config.headless,
-                "locale": "de-DE",
-                "timezone": "Europe/Berlin",
-                "args": [
-                    "--remote-debugging-port=9222",
-                    "--remote-debugging-address=127.0.0.1",
-                    "--disable-http2",
-                ],
-            }
-            try:
-                self._context = launch_persistent_context(self.config.profile_dir, **options)
-            except Exception as err:  # noqa: BLE001
-                self._clear_stale_profile_locks()
-                LOGGER.warning("Astra browser launch retry: %s", type(err).__name__)
+            now = monotonic()
+            if now < self._launch_retry_at:
+                # A previous launch may have lost its Playwright transport
+                # while Chromium itself stayed alive.  Reattach to that exact
+                # browser before honoring the cooldown; launching another
+                # persistent context against the same profile is unsafe.
+                context = (
+                    self._connect_existing_browser()
+                    if self._profile_has_active_browser()
+                    else None
+                )
+                if context is not None:
+                    self._context = context
+                    self._page = None
+                    self._launch_failure_count = 0
+                    self._launch_retry_at = 0.0
+                else:
+                    raise AstraWebError("Astra browser launch is cooling down")
+            if self._context is None:
                 try:
-                    self._context = launch_persistent_context(self.config.profile_dir, **options)
-                except Exception as retry_err:
-                    raise AstraWebError(
-                        f"Astra browser launch failed: {type(retry_err).__name__}"
-                    ) from retry_err
+                    from cloakbrowser import launch_persistent_context
+                except ImportError as err:
+                    raise AstraWebError("CloakBrowser is not installed in the sidecar") from err
+                os.makedirs(self.config.profile_dir, exist_ok=True)
+                options = dict(
+                    headless=self.config.headless,
+                    locale="de-DE",
+                    timezone="Europe/Berlin",
+                    args=[
+                        "--remote-debugging-port=9222",
+                        "--remote-debugging-address=127.0.0.1",
+                        "--disable-http2",
+                    ],
+                )
+                context = None
+                try:
+                    context = launch_persistent_context(self.config.profile_dir, **options)
+                except Exception as err:  # noqa: BLE001
+                    if self._profile_has_active_browser():
+                        context = self._connect_existing_browser()
+                        if context is not None:
+                            self._context = context
+                            self._page = None
+                            self._launch_failure_count = 0
+                            self._launch_retry_at = 0.0
+                            pages = self._context.pages
+                            self._page = pages[0] if pages else self._context.new_page()
+                            return self._page
+                    else:
+                        self._clear_stale_profile_locks()
+                        try:
+                            context = launch_persistent_context(self.config.profile_dir, **options)
+                        except Exception as retry_err:  # noqa: BLE001
+                            err = retry_err
+                        else:
+                            self._launch_failure_count = 0
+                            self._launch_retry_at = 0.0
+                    if context is None:
+                        self._launch_failure_count += 1
+                        delay = min(1800.0, 300.0 * (2 ** min(self._launch_failure_count - 1, 3)))
+                        self._launch_retry_at = monotonic() + delay
+                        raise AstraWebError(
+                            f"Astra browser launch failed: {type(err).__name__}"
+                        ) from err
+                self._context = context
+                self._launch_failure_count = 0
+                self._launch_retry_at = 0.0
         pages = self._context.pages
         if self._page is None:
             self._page = pages[0] if pages else self._context.new_page()
         return self._page
+
+    def _connect_existing_browser(self):
+        """Attach to an already-running Chromium after a lost Playwright transport."""
+        driver = None
+        try:
+            from playwright.sync_api import sync_playwright
+
+            driver = sync_playwright().start()
+            browser = driver.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            contexts = browser.contexts
+            if not contexts:
+                driver.stop()
+                return None
+            self._cdp_playwright = driver
+            return contexts[0]
+        except Exception as err:  # noqa: BLE001
+            if driver is not None:
+                try:
+                    driver.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            LOGGER.warning("Could not reattach to existing Astra browser: %s", type(err).__name__)
+            return None
+
+    def _profile_has_active_browser(self) -> bool:
+        marker = f"--user-data-dir={os.path.realpath(self.config.profile_dir)}"
+        try:
+            names = os.listdir("/proc")
+        except OSError:
+            # The sidecar runs on Linux; test and developer hosts may not
+            # expose /proc, where no container browser can be observed.
+            return False
+        for name in names:
+            if not name.isdigit():
+                continue
+            try:
+                state = open(os.path.join("/proc", name, "stat"), encoding="utf-8").read()
+                if ") Z " in state:
+                    continue
+                command = open(os.path.join("/proc", name, "cmdline"), "rb").read().replace(b"\x00", b" ").decode(errors="ignore")
+            except OSError:
+                continue
+            argv = command.split()
+            executable = os.path.basename(argv[0]) if argv else ""
+            is_chromium = executable in {"chrome", "chromium", "chromium-browser"}
+            if marker in command and is_chromium:
+                return True
+        return False
 
     def _invalidate_context(self) -> None:
         context = self._context
@@ -399,6 +552,12 @@ class AstraBrowserSession:
                 context.close()
             except Exception as err:  # noqa: BLE001
                 LOGGER.debug("Could not close stale Astra browser context: %s", type(err).__name__)
+        if self._cdp_playwright is not None:
+            try:
+                self._cdp_playwright.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._cdp_playwright = None
 
     def _clear_stale_profile_locks(self) -> None:
         for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
@@ -457,7 +616,7 @@ class AstraBrowserSession:
                 # recovery boundary because a closed context can fail both
                 # calls with different exception types.
                 cookies = self._context.cookies()
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001
             self._invalidate_context()
             raise AstraWebError("Astra browser context is unavailable") from err
         cookies = [
@@ -497,6 +656,8 @@ class AstraBrowserSession:
             headers=headers,
             timeout_seconds=self.config.dashboard_timeout_seconds,
         )
+        self._last_dashboard = dashboard
+        self._last_dashboard_at = monotonic()
         widget_url = _find_widget_url(dashboard, self.config.web_base_url, session_id)
         return self._request_text(
             opener,
@@ -578,7 +739,33 @@ def _parse_graph_points(html: str) -> list[dict[str, Any]]:
                 "cumulative_kwh": max(positive),
                 "interval_kwh": min(positive),
             })
+    # Astra renders a two-row zero graph when the selected day has no
+    # available curve data. Treat that response as missing rather than
+    # importing synthetic zero consumption into Home Assistant history.
+    if points and all(
+        point["cumulative_kwh"] == 0.0 and point["interval_kwh"] == 0.0
+        for point in points
+    ):
+        return []
     return points
+
+
+def _parse_report_meter_rows(html: str) -> list[dict[str, Any]]:
+    """Extract only dated kWh values from a report table, never raw HTML."""
+    rows: list[dict[str, Any]] = []
+    text = re.sub(r"<[^>]+>", " ", unescape(html))
+    pattern = re.compile(
+        r"(?P<date>\d{2}\.\d{2}\.\d{4})(?:\s+|[^<]{0,80})"
+        r"(?P<value>\d+(?:[\.,]\d+)?)\s*kWh",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(text):
+        try:
+            value = float(match.group("value").replace(".", "").replace(",", "."))
+        except ValueError:
+            continue
+        rows.append({"date": match.group("date"), "kwh": value})
+    return rows[:1000]
 
 
 def _cookie_matches_origin(cookie: dict[str, Any], expected: tuple[str, str, int | None]) -> bool:
@@ -695,6 +882,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/history"):
             self._handle_history()
             return
+        if self.path.startswith("/report"):
+            self._handle_report()
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -742,6 +932,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
                 {"ok": False, "error": f"Astra history request failed: {type(err).__name__}"},
+            )
+
+    def _handle_report(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        month = (query.get("month") or [""])[0]
+        try:
+            self._send_json(HTTPStatus.OK, SESSION.report(month))
+        except AstraWebError as err:
+            LOGGER.warning("Report fetch failed: %s", type(err).__name__)
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(err)})
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning("Astra report request failed: error_type=%s", type(err).__name__)
+            self._send_json(
+                HTTPStatus.BAD_GATEWAY,
+                {"ok": False, "error": f"Astra report request failed: {type(err).__name__}"},
             )
 
     def _authorized(self) -> bool:
