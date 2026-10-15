@@ -56,6 +56,34 @@ def test_graph_parser_accepts_prefixes_and_markup_inside_tooltips() -> None:
     assert points[0]["timestamp"] == "2026-10-11T00:15:00+02:00"
 
 
+def test_history_sends_all_provider_graph_date_parameters() -> None:
+    session = app.AstraBrowserSession(app.ProxyConfig(web_base_url="https://example.test/pm"))
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    calls: list[str] = []
+
+    def request_text(_opener, url, *, data, headers, timeout_seconds):
+        calls.append(url)
+        if data is not None:
+            return "<a href='pm_graph.php?id=physical&s_prod=grid'>graph</a>"
+        return "<area title='Strom 1,0 kWh am 11.10.2026 00:15:00'>"
+
+    session._request_text = request_text  # type: ignore[method-assign]
+    session.current = lambda: {"ok": True}  # type: ignore[method-assign]
+
+    result = session.history("2026-10-11")
+    assert result["ok"] is True
+    query = app.parse_qs(app.urlparse(calls[-1]).query)
+    assert query["s_vom"] == ["11.10.2026"]
+    assert query["s_bis"] == ["12.10.2026"]
+    assert query["s_bvom"] == ["11.10.2026"]
+    assert query["s_bbis"] == ["12.10.2026"]
+    assert query["s_tvom"] == ["2026-10-11 00:00:00"]
+    assert query["s_tbis"] == ["2026-10-12 00:00:00"]
+    assert query["s_width"] == ["1200"]
+    assert query["s_height"] == ["600"]
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 

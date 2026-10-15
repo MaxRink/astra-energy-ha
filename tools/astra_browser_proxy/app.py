@@ -326,12 +326,15 @@ class AstraBrowserSession:
                 "s_bis": (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00"),
                 "s_tvom": start.strftime("%Y-%m-%d 00:00:00"),
                 "s_tbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
-                "s_bvom": start.strftime("%Y-%m-%d 00:00:00"),
-                "s_bbis": (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
-                "id": "",
+                # The graph page expects both the display-date pair and the
+                # ISO/date-time pair.  These are distinct from the overview
+                # widget's four parameters; omitting the display pair can
+                # yield a valid page containing only zero-valued curves.
+                "s_bvom": start.strftime("%d.%m.%Y"),
+                "s_bbis": (start + timedelta(days=1)).strftime("%d.%m.%Y"),
                 "s_prod": "",
-                "s_width": "1600",
-                "s_height": "900",
+                "s_width": "1200",
+                "s_height": "600",
             }
             if route:
                 observed = parse_qs(urlparse(unescape(route.group(1))).query)
@@ -341,8 +344,12 @@ class AstraBrowserSession:
                 params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00")
                 params["s_tvom"] = start.strftime("%Y-%m-%d 00:00:00")
                 params["s_tbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
-                params["s_bvom"] = start.strftime("%Y-%m-%d 00:00:00")
-                params["s_bbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+                # Reassert display dates and dimensions after merging route parameters.
+                params["s_bvom"] = start.strftime("%d.%m.%Y")
+                params["s_bbis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
+                params["s_prod"] = ""
+                params["s_width"] = "1200"
+                params["s_height"] = "600"
                 graph_path = urljoin(f"{self.config.web_base_url}/", unescape(route.group(1))).split("?", 1)[0]
             else:
                 graph_path = f"{self.config.web_base_url}/pm_graph.php"
