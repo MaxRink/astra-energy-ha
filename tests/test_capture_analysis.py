@@ -2784,7 +2784,9 @@ def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> N
             raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
         )
 
-    assert astra_coordinator._is_recorder_fallback_recovery(
+    # A browser widget stand has no interval provenance. Even a fresh-looking
+    # timestamp must not authorize a large recorder-baseline recovery.
+    assert not astra_coordinator._is_recorder_fallback_recovery(
         reading(now), previous
     )
     assert not astra_coordinator._is_recorder_fallback_recovery(
@@ -2801,6 +2803,33 @@ def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> N
         max_average_kw=50.0,
         elapsed_hours=100.0,
     ) == 50.0
+
+
+def test_recorder_fallback_recovery_accepts_validated_interval_source() -> None:
+    now = astra_coordinator.dt_util.utcnow()
+    previous = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=None,
+        power_w=None,
+        imported_kwh_total=5795.351,
+        grid_kwh_total=5795.351,
+        solar_kwh_total=1265.220088,
+        total_kwh=7060.571088,
+        raw={"source": "recorder_baseline"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="TEST_TOTAL_0",
+        meter_name="Strom VGB",
+        timestamp=now,
+        power_w=None,
+        imported_kwh_total=6109.155,
+        grid_kwh_total=6109.155,
+        solar_kwh_total=1265.220088,
+        total_kwh=7374.375088,
+        raw={"action": "get_mtr_eb", "interval_total_kwh": 1.0},
+    )
+    assert astra_coordinator._is_recorder_fallback_recovery(reading, previous)
 
 
 def test_coordinator_deferred_update_rejects_implausible_live_jump(monkeypatch) -> None:
