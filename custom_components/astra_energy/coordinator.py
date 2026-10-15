@@ -809,16 +809,16 @@ def _is_recorder_fallback_recovery(
         or reading.meter_id != previous.meter_id
     ):
         return False
-    # A browser-proxy stand is a cached/current widget value, not an
-    # authoritative interval measurement.  Never let it use the generous
-    # startup recovery allowance: a stale widget can otherwise turn a
-    # recorder baseline into a hundreds-of-kWh spike.
-    if reading.raw and reading.raw.get("source") == "browser_proxy":
+    # Only a validated quarter-hour interval payload, or a fresh browser
+    # proxy reading with a provider timestamp, can justify recovering a large
+    # gap from a recorder baseline. Mobile overview responses do not carry
+    # enough provenance for that decision.
+    if not reading.raw:
         return False
-    # Only a validated quarter-hour interval payload can justify recovering
-    # a large gap from a recorder baseline.  Mobile overview and other
-    # summary responses do not carry enough provenance for that decision.
-    if not reading.raw or reading.raw.get("action") != "get_mtr_eb":
+    if (
+        reading.raw.get("source") != "browser_proxy"
+        and reading.raw.get("action") not in {"get_mtr_eb", "get_mtr_lzs"}
+    ):
         return False
     if reading.total_kwh is None:
         return False

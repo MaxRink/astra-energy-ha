@@ -61,6 +61,9 @@ class ProxyConfig:
     current_cache_seconds: int = min(
         max(int(os.getenv("ASTRA_CURRENT_CACHE_SECONDS", "30")), 0), 300
     )
+    session_refresh_seconds: int = min(
+        max(int(os.getenv("ASTRA_SESSION_REFRESH_SECONDS", "3600")), 30), 3600
+    )
 
 
 class AstraWebError(RuntimeError):
@@ -117,6 +120,7 @@ class AstraBrowserSession:
         self._last_login_attempt: str | None = None
         self._last_current: dict[str, Any] | None = None
         self._last_current_at = 0.0
+        self._last_session_capture_at = 0.0
         self._last_dashboard = ""
         self._last_dashboard_at = 0.0
         self._current_phase = "idle"
@@ -182,6 +186,7 @@ class AstraBrowserSession:
             elif self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
             self._capture_browser_session()
+            self._last_session_capture_at = monotonic()
             return {
                 "ok": True,
                 "url": _redact_url(page.url),
@@ -200,25 +205,17 @@ class AstraBrowserSession:
             ):
                 LOGGER.info("phase=current_cache_hit age_ms=%.1f", (monotonic() - self._last_current_at) * 1000)
                 return json.loads(json.dumps(self._last_current))
-            # Restored cookies/session IDs still need a live browser context so
-            # stale session metadata can be refreshed safely.
-            self._current_phase = "ensure_page"
-            self._ensure_page()
             capture_started = perf_counter()
             self._current_phase = "capture_session"
-            try:
-                self._capture_browser_session()
-            except AstraWebError as err:
-                # A crashed browser context can retain truthy cookie/session
-                # metadata while every Playwright operation fails. Recreate
-                # it once so a normal refresh can recover without exposing
-                # provider credentials or hammering the login endpoint.
-                LOGGER.warning(
-                    "phase=capture_session_recover error_type=%s",
-                    type(err).__name__,
-                )
-                self._ensure_page()
-                self._capture_browser_session()
+            should_capture = (
+                not self._last_session_capture_at
+                or not self._last_cookie
+                or not self._last_session_id
+                or monotonic() - self._last_session_capture_at
+                >= self.config.session_refresh_seconds
+            )
+            if should_capture:
+                self._refresh_browser_session()
             LOGGER.info("phase=capture_session elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - capture_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
             if not self._last_cookie or not self._last_session_id:
                 LOGGER.info("phase=login_start")
@@ -234,7 +231,22 @@ class AstraBrowserSession:
 
             fetch_started = perf_counter()
             self._current_phase = "fetch_widget"
-            html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
+            try:
+                html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
+            except AstraWebError as err:
+                cause = err.__cause__
+                rejected = (
+                    isinstance(cause, HTTPError) and cause.code in (401, 403)
+                ) or str(err) == "Astra browser session is logged out"
+                if not rejected:
+                    raise
+                self._last_session_capture_at = 0.0
+                self._refresh_browser_session()
+                try:
+                    html = self._fetch_meter_widget(self._last_session_id, self._last_cookie)
+                except AstraWebError:
+                    self._last_session_capture_at = 0.0
+                    raise
             LOGGER.info("phase=widget_fetch_done elapsed_ms=%.1f response_bytes=%s", (perf_counter() - fetch_started) * 1000, len(html.encode("latin-1", errors="ignore")))
             parse_started = perf_counter()
             self._current_phase = "parse_widget"
@@ -259,6 +271,20 @@ class AstraBrowserSession:
             self._last_current_at = monotonic()
             self._current_phase = "complete"
             return json.loads(json.dumps(result))
+
+    def _refresh_browser_session(self) -> None:
+        self._current_phase = "ensure_page"
+        try:
+            self._ensure_page()
+            self._capture_browser_session()
+        except AstraWebError as err:
+            LOGGER.warning(
+                "phase=capture_session_recover error_type=%s",
+                type(err).__name__,
+            )
+            self._ensure_page()
+            self._capture_browser_session()
+        self._last_session_capture_at = monotonic()
 
     def history(self, day: str) -> dict[str, Any]:
         """Read one provider day as timestamped graph intervals.
