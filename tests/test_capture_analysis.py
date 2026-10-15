@@ -2059,7 +2059,7 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     assert coordinator.browser_proxy_status["status"] == "rejected"
 
 
-def test_coordinator_accepts_timestamped_browser_recovery_from_recorder_baseline(
+def test_coordinator_rejects_timestamped_browser_recovery_from_recorder_baseline(
     monkeypatch,
 ) -> None:
     class Client:
@@ -2124,10 +2124,10 @@ def test_coordinator_accepts_timestamped_browser_recovery_from_recorder_baseline
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["TEST_TOTAL_0"].total_kwh == pytest.approx(5666.366)
-    assert coordinator.api_status == "browser_proxy"
-    assert coordinator.last_successful_source == "browser_proxy"
-    assert coordinator.browser_proxy_status["status"] == "ok"
+    assert result == {}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_successful_source is None
+    assert coordinator.browser_proxy_status["status"] == "rejected"
 
 
 def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
@@ -2467,7 +2467,7 @@ def test_recorder_baseline_accepts_plausible_elapsed_catchup() -> None:
     }
 
 
-def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider_data(
+def test_coordinator_rejects_implausible_current_provider_data_after_stale_fallback(
     monkeypatch,
 ) -> None:
     class Client:
@@ -2536,15 +2536,15 @@ def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider
     result = asyncio.run(coordinator._async_update_data())
     reading = result["TEST_TOTAL_0"]
 
-    assert coordinator.api_status == "ok"
-    assert coordinator.last_successful_source == "mobile"
-    assert coordinator.last_successful_at is not None
-    assert coordinator._deferred_failures == 0
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_successful_source is None
+    assert coordinator.last_successful_at is None
+    assert coordinator._deferred_failures == 4
     assert coordinator._deferred_backoff_until is None
-    assert coordinator.last_error is None
-    assert reading.grid_kwh_total == pytest.approx(4865.128)
-    assert reading.solar_kwh_total == pytest.approx(822.977)
-    assert reading.total_kwh == pytest.approx(5688.105)
+    assert reading.raw == {"source": "recorder_fallback"}
+    assert reading.grid_kwh_total == pytest.approx(4761.33554541505)
+    assert reading.solar_kwh_total == pytest.approx(733.492454584946)
+    assert reading.total_kwh == pytest.approx(5494.828)
 
 
 def test_coordinator_still_rejects_implausible_recorder_fallback_recovery(
@@ -2784,7 +2784,9 @@ def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> N
             raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
         )
 
-    assert astra_coordinator._is_recorder_fallback_recovery(
+    # A browser widget stand has no interval provenance. Even a fresh-looking
+    # timestamp must not authorize a large recorder-baseline recovery.
+    assert not astra_coordinator._is_recorder_fallback_recovery(
         reading(now), previous
     )
     assert not astra_coordinator._is_recorder_fallback_recovery(
