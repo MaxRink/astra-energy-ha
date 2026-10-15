@@ -340,11 +340,14 @@ class AstraBrowserSession:
                 observed = parse_qs(urlparse(unescape(route.group(1))).query)
                 params.update({key: values[0] for key, values in observed.items() if values})
                 params["sessionId"] = self._last_session_id
-                params["s_vom"] = start.strftime("%d.%m.%Y 00:00:00")
-                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y 00:00:00")
+                params["s_vom"] = start.strftime("%d.%m.%Y")
+                params["s_bis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
                 params["s_tvom"] = start.strftime("%Y-%m-%d 00:00:00")
                 params["s_tbis"] = (start + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
-                # Reassert display dates and dimensions after merging route parameters.
+                # A dashboard route may carry stale display dates or graph
+                # dimensions.  Reassert the complete requested range after
+                # merging it so the provider cannot silently return only
+                # boundary/null points for the selected day.
                 params["s_bvom"] = start.strftime("%d.%m.%Y")
                 params["s_bbis"] = (start + timedelta(days=1)).strftime("%d.%m.%Y")
                 params["s_prod"] = ""
