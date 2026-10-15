@@ -2059,7 +2059,7 @@ def test_coordinator_rejected_browser_proxy_startup_uses_recorder_fallback(
     assert coordinator.browser_proxy_status["status"] == "rejected"
 
 
-def test_coordinator_accepts_timestamped_browser_recovery_from_recorder_baseline(
+def test_coordinator_rejects_browser_recovery_from_recorder_baseline(
     monkeypatch,
 ) -> None:
     class Client:
@@ -2124,10 +2124,10 @@ def test_coordinator_accepts_timestamped_browser_recovery_from_recorder_baseline
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["TEST_TOTAL_0"].total_kwh == pytest.approx(5666.366)
-    assert coordinator.api_status == "browser_proxy"
-    assert coordinator.last_successful_source == "browser_proxy"
-    assert coordinator.browser_proxy_status["status"] == "ok"
+    assert result == {}
+    assert coordinator.api_status == "deferred"
+    assert coordinator.last_successful_source is None
+    assert coordinator.browser_proxy_status["status"] == "rejected"
 
 
 def test_coordinator_rejected_browser_proxy_refreshes_old_recorder_fallback(
@@ -2467,7 +2467,7 @@ def test_recorder_baseline_accepts_plausible_elapsed_catchup() -> None:
     }
 
 
-def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider_data(
+def test_coordinator_recovers_from_stale_recorder_fallback_with_validated_interval_data(
     monkeypatch,
 ) -> None:
     class Client:
@@ -2484,7 +2484,7 @@ def test_coordinator_recovers_from_stale_recorder_fallback_with_current_provider
                     total_kwh=5688.105,
                     grid_price_gross_eur_per_kwh=0.34986,
                     solar_price_gross_eur_per_kwh=0.2499,
-                    raw={"action": "get_mtr_lzs"},
+                    raw={"action": "get_mtr_eb", "interval_total_kwh": 1.0},
                 )
             ]
 
@@ -2784,7 +2784,7 @@ def test_recorder_fallback_recovery_rejects_stale_and_future_browser_data() -> N
             raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
         )
 
-    assert astra_coordinator._is_recorder_fallback_recovery(
+    assert not astra_coordinator._is_recorder_fallback_recovery(
         reading(now), previous
     )
     assert not astra_coordinator._is_recorder_fallback_recovery(
