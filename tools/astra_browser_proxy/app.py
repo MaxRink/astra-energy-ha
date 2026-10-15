@@ -460,7 +460,7 @@ class AstraBrowserSession:
                 context = None
                 try:
                     context = launch_persistent_context(self.config.profile_dir, **options)
-                except Exception as err:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     if self._profile_has_active_browser():
                         context = self._connect_existing_browser()
                         if context is not None:
