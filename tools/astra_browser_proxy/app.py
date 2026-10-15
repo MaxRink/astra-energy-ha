@@ -560,9 +560,9 @@ _GRAPH_TITLE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _GRAPH_POINT_RE = re.compile(
-    r"\bist\s+([0-9.,\u00a0\s-]+?)\s+kWh\s+um\s+"
+    r"([0-9][0-9.,\u00a0\s-]*?)\s*kWh\b.*?"
     r"(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2})\b",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -570,7 +570,9 @@ def _parse_graph_points(html: str) -> list[dict[str, Any]]:
     """Parse graph image-map markers into timestamped cumulative/interval data."""
     values: dict[datetime, list[float]] = {}
     for raw_title in _GRAPH_TITLE_RE.findall(html):
-        match = _GRAPH_POINT_RE.search(unescape(raw_title[1]))
+        title = re.sub(r"<[^>]+>", " ", unescape(raw_title[1]))
+        title = re.sub(r"[^0-9A-Za-z.,:\-]+", " ", title)
+        match = _GRAPH_POINT_RE.search(title)
         if not match:
             continue
         raw_value, raw_timestamp = match.groups()

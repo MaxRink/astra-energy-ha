@@ -46,6 +46,16 @@ def test_graph_parser_accepts_provider_attribute_and_entity_variants() -> None:
     ]
 
 
+def test_graph_parser_accepts_prefixes_and_markup_inside_tooltips() -> None:
+    html = (
+        "<area title='0 ( 0) Strom 12,345 <br> kWh am "
+        "11.10.2026 00:15:00'>"
+    )
+    points = app._parse_graph_points(html)
+    assert points[0]["cumulative_kwh"] == 12.345
+    assert points[0]["timestamp"] == "2026-10-11T00:15:00+02:00"
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 
