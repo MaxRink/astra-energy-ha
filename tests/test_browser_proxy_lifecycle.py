@@ -79,6 +79,48 @@ def test_current_starts_browser_before_using_restored_session(monkeypatch) -> No
     assert events[:2] == ["ensure", "capture"]
 
 
+def test_current_reuses_recent_session_metadata_without_cookie_probe(monkeypatch) -> None:
+    session = app.AstraBrowserSession(
+        app.ProxyConfig(current_cache_seconds=0, session_refresh_seconds=300)
+    )
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    session._ensure_page = lambda: None  # type: ignore[method-assign]
+    captures = []
+    session._capture_browser_session = lambda: captures.append(True)  # type: ignore[method-assign]
+    session._fetch_meter_widget = lambda *args: "Strom VGB 1,00 kWh"  # type: ignore[method-assign]
+    monkeypatch.setattr(app, "parse_meter_widget", lambda html, fallback_meter_id: {"meter_id": fallback_meter_id})
+
+    session.current()
+    session.current()
+
+    assert captures == [True]
+
+
+def test_current_refreshes_at_a_realistic_spaced_poll_interval(monkeypatch) -> None:
+    """Nineteen-minute polls must reuse valid metadata within the one-hour TTL."""
+    now = [10000.0]
+    monkeypatch.setattr(app, "monotonic", lambda: now[0])
+    session = app.AstraBrowserSession(
+        app.ProxyConfig(current_cache_seconds=0, session_refresh_seconds=3600)
+    )
+    session._last_cookie = "cookie"
+    session._last_session_id = "session"
+    captures = []
+    session._ensure_page = lambda: None  # type: ignore[method-assign]
+    session._capture_browser_session = lambda: captures.append(now[0])  # type: ignore[method-assign]
+    session._fetch_meter_widget = lambda *args: "Strom VGB 1,00 kWh"  # type: ignore[method-assign]
+    monkeypatch.setattr(app, "parse_meter_widget", lambda html, fallback_meter_id: {"meter_id": fallback_meter_id})
+
+    session.current()
+    now[0] += 19 * 60
+    session.current()
+    now[0] += 42 * 60 + 1
+    session.current()
+
+    assert captures == [10000.0, 10000.0 + 61 * 60 + 1]
+
+
 def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) -> None:
     for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
         path = tmp_path / name

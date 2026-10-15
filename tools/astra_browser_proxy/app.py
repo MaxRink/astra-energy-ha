@@ -61,6 +61,9 @@ class ProxyConfig:
     current_cache_seconds: int = min(
         max(int(os.getenv("ASTRA_CURRENT_CACHE_SECONDS", "30")), 0), 300
     )
+    session_refresh_seconds: int = min(
+        max(int(os.getenv("ASTRA_SESSION_REFRESH_SECONDS", "3600")), 30), 3600
+    )
 
 
 class AstraWebError(RuntimeError):
@@ -114,6 +117,7 @@ class AstraBrowserSession:
         self._last_current: dict[str, Any] | None = None
         self._last_current_at = 0.0
         self._current_phase = "idle"
+        self._last_session_capture_at = 0.0
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -157,6 +161,7 @@ class AstraBrowserSession:
             elif self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
             self._capture_browser_session()
+            self._last_session_capture_at = monotonic()
             return {
                 "ok": True,
                 "url": _redact_url(page.url),
@@ -175,25 +180,43 @@ class AstraBrowserSession:
             ):
                 LOGGER.info("phase=current_cache_hit age_ms=%.1f", (monotonic() - self._last_current_at) * 1000)
                 return json.loads(json.dumps(self._last_current))
-            # Restored cookies/session IDs still need a live browser context so
-            # stale session metadata can be refreshed safely.
-            self._current_phase = "ensure_page"
-            self._ensure_page()
             capture_started = perf_counter()
             self._current_phase = "capture_session"
-            try:
-                self._capture_browser_session()
-            except AstraWebError as err:
-                # A crashed browser context can retain truthy cookie/session
-                # metadata while every Playwright operation fails. Recreate
-                # it once so a normal refresh can recover without exposing
-                # provider credentials or hammering the login endpoint.
-                LOGGER.warning(
-                    "phase=capture_session_recover error_type=%s",
-                    type(err).__name__,
+            should_capture = (
+                not self._last_cookie
+                or not self._last_session_id
+                or monotonic() - self._last_session_capture_at
+                >= self.config.session_refresh_seconds
+            )
+            if should_capture:
+                try:
+                    # The widget request uses the last validated cookie and
+                    # session ID directly.  Do not touch the persistent
+                    # browser context on every poll: its Playwright cookie
+                    # transport can become stale while the provider session
+                    # remains valid.  Reattach only when metadata is absent
+                    # or the bounded refresh interval has elapsed.
+                    self._current_phase = "ensure_page"
+                    self._ensure_page()
+                    self._capture_browser_session()
+                    self._last_session_capture_at = monotonic()
+                except AstraWebError as err:
+                    # A crashed browser context can retain truthy cookie/session
+                    # metadata while every Playwright operation fails. Recreate
+                    # it once so a normal refresh can recover without exposing
+                    # provider credentials or hammering the login endpoint.
+                    LOGGER.warning(
+                        "phase=capture_session_recover error_type=%s",
+                        type(err).__name__,
+                    )
+                    self._ensure_page()
+                    self._capture_browser_session()
+                    self._last_session_capture_at = monotonic()
+            else:
+                LOGGER.info(
+                    "phase=capture_session_skipped age_s=%.1f",
+                    monotonic() - self._last_session_capture_at,
                 )
-                self._ensure_page()
-                self._capture_browser_session()
             LOGGER.info("phase=capture_session elapsed_ms=%.1f has_cookie=%s has_session_id=%s", (perf_counter() - capture_started) * 1000, bool(self._last_cookie), bool(self._last_session_id))
             if not self._last_cookie or not self._last_session_id:
                 LOGGER.info("phase=login_start")
