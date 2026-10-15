@@ -120,23 +120,36 @@ class AstraBrowserSession:
         self._last_session_capture_at = 0.0
 
     def health(self) -> dict[str, Any]:
-        with self._lock:
-            context_healthy: bool | None = None
-            if self._context is not None:
-                try:
-                    _ = self._context.pages
-                    context_healthy = True
-                except Exception:  # noqa: BLE001
-                    context_healthy = False
-            return {
-                "ok": True,
-                "browser_started": self._context is not None,
-                "browser_context_healthy": context_healthy,
-                "has_cookie": bool(self._last_cookie),
-                "has_session_id": bool(self._last_session_id),
-                "last_login_attempt": self._last_login_attempt,
-                "profile_dir": self.config.profile_dir,
-            }
+        # Do not hold the browser-operation lock while probing the context.
+        # A provider/browser timeout must not make liveness wait behind
+        # /current or /history.
+        acquired = self._lock.acquire(blocking=False)
+        try:
+            # These are immutable/reference reads; when an operation is in
+            # progress, a best-effort snapshot keeps liveness observable.
+            context = self._context
+            has_cookie = bool(self._last_cookie)
+            has_session_id = bool(self._last_session_id)
+            last_login_attempt = self._last_login_attempt
+        finally:
+            if acquired:
+                self._lock.release()
+        context_healthy: bool | None = None
+        if context is not None:
+            try:
+                _ = context.pages
+                context_healthy = True
+            except Exception:  # noqa: BLE001
+                context_healthy = False
+        return {
+            "ok": True,
+            "browser_started": context is not None,
+            "browser_context_healthy": context_healthy,
+            "has_cookie": has_cookie,
+            "has_session_id": has_session_id,
+            "last_login_attempt": last_login_attempt,
+            "profile_dir": self.config.profile_dir,
+        }
 
     def login(self) -> dict[str, Any]:
         with self._lock:

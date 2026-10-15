@@ -5962,3 +5962,35 @@ def test_post_action_serializes_timestamp_and_action_pairs() -> None:
 
     asyncio.run(run_pair())
     assert session.max_active == 1
+
+
+def test_large_recorder_recovery_rejects_browser_widget_spike() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter", meter_name="meter", timestamp=None, power_w=None,
+        imported_kwh_total=5795.0, grid_kwh_total=5795.0,
+        solar_kwh_total=1265.0, total_kwh=7060.0,
+        raw={"source": "recorder_fallback"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="meter", meter_name="meter", timestamp=dt.datetime.now(dt.UTC), power_w=None,
+        imported_kwh_total=6119.0, grid_kwh_total=6119.0,
+        solar_kwh_total=1366.0, total_kwh=7485.0,
+        raw={"source": "browser_proxy", "proxy_source": "astra_web_widget"},
+    )
+    assert astra_coordinator._is_recorder_fallback_recovery(reading, previous) is False
+
+
+def test_large_recorder_recovery_accepts_validated_interval_source() -> None:
+    previous = astra_api.AstraMeterReading(
+        meter_id="meter", meter_name="meter", timestamp=None, power_w=None,
+        imported_kwh_total=5795.0, grid_kwh_total=5795.0,
+        solar_kwh_total=1265.0, total_kwh=7060.0,
+        raw={"source": "recorder_fallback"},
+    )
+    reading = astra_api.AstraMeterReading(
+        meter_id="meter", meter_name="meter", timestamp=dt.datetime.now(dt.UTC), power_w=None,
+        imported_kwh_total=6119.0, grid_kwh_total=6119.0,
+        solar_kwh_total=1366.0, total_kwh=7485.0,
+        raw={"action": "get_mtr_eb", "interval_total_kwh": 1.0},
+    )
+    assert astra_coordinator._is_recorder_fallback_recovery(reading, previous) is True
