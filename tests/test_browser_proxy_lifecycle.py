@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 APP_PATH = Path(__file__).parents[1] / "tools" / "astra_browser_proxy" / "app.py"
 SPEC = importlib.util.spec_from_file_location("astra_browser_proxy_app", APP_PATH)
 assert SPEC and SPEC.loader
@@ -60,6 +59,8 @@ def test_health_distinguishes_stale_browser_context() -> None:
 
 
 def test_current_starts_browser_before_using_restored_session(monkeypatch) -> None:
+    # Fresh CI runners can have less uptime than the session refresh interval.
+    monkeypatch.setattr(app, "monotonic", lambda: 10.0)
     session = app.AstraBrowserSession(app.ProxyConfig())
     events: list[str] = []
     session._last_cookie = "restored-cookie"
@@ -121,6 +122,57 @@ def test_current_refreshes_at_a_realistic_spaced_poll_interval(monkeypatch) -> N
     assert captures == [10000.0, 10000.0 + 61 * 60 + 1]
 
 
+@pytest.mark.parametrize("status", [401, 403, "logged_out"])
+def test_current_refreshes_rejected_cached_session_once(monkeypatch, status) -> None:
+    monkeypatch.setattr(app, "monotonic", lambda: 100.0)
+    session = app.AstraBrowserSession(app.ProxyConfig(current_cache_seconds=0))
+    session._last_cookie = "cached-cookie"
+    session._last_session_id = "cached-session"
+    session._last_session_capture_at = 99.0
+    captures = []
+    session._ensure_page = lambda: None
+    session._capture_browser_session = lambda: captures.append(True)
+    calls = []
+
+    def fetch(*args):
+        calls.append(True)
+        if len(calls) == 1:
+            if status == "logged_out":
+                raise app.AstraWebError("Astra browser session is logged out")
+            raise app.AstraWebError("Astra web rejected request") from app.HTTPError(
+                "https://example.test", status, "Unauthorized", {}, None
+            )
+        return "synthetic widget"
+
+    session._fetch_meter_widget = fetch
+    monkeypatch.setattr(app, "parse_meter_widget", lambda *args, **kwargs: {"total": 1})
+    assert session.current()["ok"]
+    assert len(calls) == 2
+    assert captures == [True]
+
+
+@pytest.mark.parametrize("message", ["Astra web request timed out", "Astra returned a reCAPTCHA login page"])
+def test_current_does_not_retry_non_auth_failure(monkeypatch, message) -> None:
+    monkeypatch.setattr(app, "monotonic", lambda: 100.0)
+    session = app.AstraBrowserSession(app.ProxyConfig(current_cache_seconds=0))
+    session._last_cookie = "cached-cookie"
+    session._last_session_id = "cached-session"
+    session._last_session_capture_at = 99.0
+    session._last_current = {"previous": True}
+    calls = []
+
+    def fetch(*args):
+        calls.append(True)
+        raise app.AstraWebError(message)
+
+    session._fetch_meter_widget = fetch
+    session._ensure_page = lambda: pytest.fail("unexpected browser retry")
+    with pytest.raises(app.AstraWebError, match=message):
+        session.current()
+    assert calls == [True]
+    assert session._last_current == {"previous": True}
+
+
 def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) -> None:
     for name in ("SingletonCookie", "SingletonLock", "SingletonSocket", "Default/LOCK"):
         path = tmp_path / name
@@ -129,7 +181,8 @@ def test_ensure_page_retries_after_stale_profile_locks(monkeypatch, tmp_path) ->
     attempts = []
 
     class Context:
-        pages = []
+        def __init__(self):
+            self.pages = []
 
         def new_page(self):
             return object()
@@ -159,7 +212,8 @@ def test_ensure_page_recreates_closed_browser_context(monkeypatch, tmp_path) -> 
             return None
 
     class FreshContext:
-        pages = []
+        def __init__(self):
+            self.pages = []
 
         def cookies(self, *args):
             return []
@@ -193,7 +247,8 @@ def test_capture_session_recovers_once_from_closed_context(monkeypatch, tmp_path
             return None
 
     class FreshContext:
-        pages = []
+        def __init__(self):
+            self.pages = []
 
         def cookies(self, *args):
             return []
@@ -235,7 +290,8 @@ def test_capture_session_recovers_when_cookie_compatibility_fallback_also_fails(
             return None
 
     class FreshContext:
-        pages = []
+        def __init__(self):
+            self.pages = []
 
         def cookies(self, *args):
             return []
