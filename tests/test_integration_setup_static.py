@@ -189,4 +189,30 @@ def test_coordinator_publishes_diagnostics_for_unchanged_fallback_readings() -> 
         / "astra_energy"
         / "coordinator.py"
     ).read_text(encoding="utf-8")
-    assert "always_update=True" in source
+    tree = ast.parse(source)
+    coordinator = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AstraEnergyCoordinator"
+    )
+    init = next(
+        node
+        for node in coordinator.body
+        if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+    )
+    calls = [
+        node
+        for node in ast.walk(init)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Name)
+        and node.func.value.func.id == "super"
+    ]
+    assert any(
+        keyword.arg == "always_update"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for call in calls
+        for keyword in call.keywords
+    )
