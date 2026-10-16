@@ -179,3 +179,14 @@ def test_reauth_does_not_abort_when_username_belongs_to_same_entry() -> None:
 
     assert source.count("self._abort_if_unique_id_configured()") == 1
     assert "async_update_reload_and_abort(entry, data_updates=merged)" in source
+
+
+def test_coordinator_publishes_diagnostics_for_unchanged_fallback_readings() -> None:
+    """A browser fallback can refresh diagnostics without changing meter values."""
+    source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "astra_energy"
+        / "coordinator.py"
+    ).read_text(encoding="utf-8")
+    assert "always_update=True" in source
