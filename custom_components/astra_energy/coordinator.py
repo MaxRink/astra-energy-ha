@@ -140,6 +140,9 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
             name=DOMAIN,
             config_entry=entry,
             update_interval=update_interval,
+            # Diagnostics must publish even when fallback values are unchanged.
+            # The source/status fields are meaningful coordinator state.
+            always_update=True,
         )
         self.config_entry = entry
         self.client = AstraClient(

@@ -179,3 +179,40 @@ def test_reauth_does_not_abort_when_username_belongs_to_same_entry() -> None:
 
     assert source.count("self._abort_if_unique_id_configured()") == 1
     assert "async_update_reload_and_abort(entry, data_updates=merged)" in source
+
+
+def test_coordinator_publishes_diagnostics_for_unchanged_fallback_readings() -> None:
+    """A browser fallback can refresh diagnostics without changing meter values."""
+    source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "astra_energy"
+        / "coordinator.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    coordinator = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AstraEnergyCoordinator"
+    )
+    init = next(
+        node
+        for node in coordinator.body
+        if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+    )
+    calls = [
+        node
+        for node in ast.walk(init)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Name)
+        and node.func.value.func.id == "super"
+    ]
+    assert any(
+        keyword.arg == "always_update"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for call in calls
+        for keyword in call.keywords
+    )
