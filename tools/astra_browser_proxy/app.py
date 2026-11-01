@@ -606,11 +606,20 @@ class AstraBrowserSession:
                 LOGGER.warning("Could not clear Astra profile lock: %s", type(err).__name__)
 
     def _fill_best_effort_login(self, page) -> None:
+        # The Astra Cockpit login form uses ``UserName`` and ``Password``
+        # inputs and an image submit control.  Older generic selectors missed
+        # the image button, so the browser proxy filled the form but never
+        # submitted it.  Keep the generic fallbacks for the other Astra login
+        # portals (Energy Monitoring and Inventory).
         selectors = (
+            ("#UserName", self.config.username),
+            ("input[name='UserName']", self.config.username),
             ("input[name='username']", self.config.username),
             ("input[name='user']", self.config.username),
             ("input[name='login']", self.config.username),
             ("input[type='text']", self.config.username),
+            ("#Password", self.config.password),
+            ("input[name='Password']", self.config.password),
             ("input[name='password']", self.config.password),
             ("input[name='pass']", self.config.password),
             ("input[type='password']", self.config.password),
@@ -624,6 +633,7 @@ class AstraBrowserSession:
                 LOGGER.debug("Could not fill login selector %s: %s", selector, type(err).__name__)
                 continue
         for selector in (
+            "input[type='image']",
             "button[type='submit']",
             "input[type='submit']",
             "button:has-text('Login')",

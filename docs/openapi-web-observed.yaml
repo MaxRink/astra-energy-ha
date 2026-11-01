@@ -4,7 +4,15 @@ info:
   version: 0.1.0-observed
   description: |
     Observed browser endpoints from CDP capture. This is not an official API;
-    the browser flow is frame-based and uses reCAPTCHA for login.
+    the browser flow is frame-based and uses reCAPTCHA v3 for login.
+
+    Live recheck 2026-11-01: the login form still uses `UserName`, `Password`
+    and a hidden `Email` input, plus an `input[type=image]` submit control. The
+    three entry points share `login.js?v=1.6`:
+    `csloginw.php` (Cockpit, `g_sys=1`), `csloginem.php` (Energy Monitoring,
+    `g_sys=2`) and `csloginiv.php` (Inventory, `g_sys=3`). A valid reCAPTCHA
+    token is required; filling the fields without submitting the image control
+    does not log in.
 servers:
   - url: https://astra-cloud.com
 paths:
@@ -24,9 +32,20 @@ paths:
               properties:
                 UserName:
                   type: string
+                  description: Full Astra Cockpit email address; case-sensitive.
                 Password:
                   type: string
                 Email:
+                  type: string
+                  description: Present in the form but hidden by CSS on the observed page.
+                bActivationFlag:
+                  const: NOCHECK
+                iCounter:
+                  const: "0"
+                EULA_OK:
+                  type: string
+                  description: Observed as `0` unless the page's GDPR flow sets it.
+                userEULA:
                   type: string
                 strRequestType:
                   const: Submit
@@ -35,7 +54,61 @@ paths:
                   description: Required reCAPTCHA v3 token. Missing, empty, and bogus probe values returned the login page without a session.
       responses:
         "200":
-          description: Login response/frame bootstrap.
+          description: Login response/frame bootstrap or the login page again on rejection.
+  /readyxnet/source/login/csloginem.php:
+    get:
+      summary: Energy Monitoring login page
+      responses:
+        "200":
+          description: HTML login form with `g_sys=2`.
+    post:
+      summary: Energy Monitoring login submit
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                UserName:
+                  type: string
+                Password:
+                  type: string
+                Email:
+                  type: string
+                strRequestType:
+                  const: submit_login
+                g-recaptcha-response:
+                  type: string
+      responses:
+        "200":
+          description: Login response/frame bootstrap or the login page again on rejection.
+  /readyxnet/source/login/csloginiv.php:
+    get:
+      summary: Inventory login page
+      responses:
+        "200":
+          description: HTML login form with `g_sys=3`.
+    post:
+      summary: Inventory login submit
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                UserName:
+                  type: string
+                Password:
+                  type: string
+                Email:
+                  type: string
+                strRequestType:
+                  const: submit_login
+                g-recaptcha-response:
+                  type: string
+      responses:
+        "200":
+          description: Login response/frame bootstrap or the login page again on rejection.
   /astra04/readyxnet/source/pm/ajax.php:
     post:
       summary: Widget JSON-RPC endpoint
@@ -109,9 +182,31 @@ paths:
           name: s_tbis
           schema:
             type: string
+        - in: query
+          name: s_bvom
+          schema:
+            type: string
+            description: Display start date `DD.MM.YYYY`.
+        - in: query
+          name: s_bbis
+          schema:
+            type: string
+            description: Display end date `DD.MM.YYYY`.
+        - in: query
+          name: s_prod
+          schema:
+            type: string
+        - in: query
+          name: s_width
+          schema:
+            type: string
+        - in: query
+          name: s_height
+          schema:
+            type: string
       responses:
         "200":
-          description: ISO-8859-1 HTML with graph tooltip values in image-map areas.
+          description: ISO-8859-1 HTML with graph tooltip values in image-map areas. Send both the display-date pair (`s_vom`/`s_bis` or `s_bvom`/`s_bbis`) and the ISO pair (`s_tvom`/`s_tbis`); otherwise the provider may return only zero/boundary points.
   /astra04/readyxnet/source/pm/pm_repzw.php:
     get:
       summary: Meter readings page

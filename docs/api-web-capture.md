@@ -1,5 +1,10 @@
 # Astra Web Capture Summary
 
+> This file describes the local June 2026 capture. For the current login form
+> and the 2026-11-01 live recheck, see
+> [api-live-2026-11-01.md](api-live-2026-11-01.md). In particular, the current
+> login submit control is an `input[type=image]`, not a submit button.
+
 Source capture: `captures/web-login.jsonl`
 
 Sensitive values are redacted. Raw captures stay local and are gitignored.

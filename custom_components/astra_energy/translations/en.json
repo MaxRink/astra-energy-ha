@@ -5,16 +5,16 @@
       "reauth_successful": "Reauthentication successful"
     },
     "error": {
-      "cannot_connect": "Failed to connect",
-      "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Could not reach Astra. The mobile endpoint may be temporarily empty, rate-limited, or blocked for this IP; Home Assistant will retry.",
+      "invalid_auth": "Astra rejected the credentials. Use the full, case-sensitive email address and the current password.",
       "unknown": "Unexpected error"
     },
     "step": {
       "user": {
         "title": "Astra Energy",
-        "description": "Connect an Astra energy account.",
+        "description": "Connect an Astra energy account. Use the full email address registered with Astra Cockpit; the mobile API is case-sensitive.",
         "data": {
-          "username": "Username",
+          "username": "Email address",
           "password": "Password",
           "base_url": "Base URL",
           "poll_interval": "Polling interval",
@@ -40,7 +40,7 @@
           "browser_proxy_token": "Browser proxy bearer token"
         },
         "data_description": {
-          "username": "Astra Cockpit username.",
+          "username": "Full Astra Cockpit email address, exactly as registered (case-sensitive). This is not the tenant or meter number.",
           "password": "Astra Cockpit password.",
           "base_url": "Android API endpoint. Keep the default unless Astra changes servers.",
           "poll_interval": "How often Home Assistant polls Astra for current meter readings. The default is 3600 seconds / 1 hour.",
@@ -68,17 +68,21 @@
       },
       "reauth_confirm": {
         "title": "Reauthenticate Astra Energy",
-        "description": "Update Astra credentials.",
+        "description": "Update the Astra email address and password. The mobile API requires the full, case-sensitive email address.",
         "data": {
-          "username": "Username",
+          "username": "Email address",
           "password": "Password"
+        },
+        "data_description": {
+          "username": "Full Astra Cockpit email address, exactly as registered.",
+          "password": "Current Astra Cockpit password."
         }
       },
       "reconfigure": {
         "title": "Reconfigure Astra Energy",
         "description": "Update Astra connection settings.",
         "data": {
-          "username": "Username",
+          "username": "Email address",
           "password": "Password",
           "base_url": "Base URL",
           "poll_interval": "Polling interval",
@@ -195,7 +199,7 @@
     },
     "api_deferred": {
       "title": "Astra Energy data deferred",
-      "description": "Astra returned an empty, malformed, or incomplete payload. Astra Energy withheld cumulative energy sensors to avoid invalid Home Assistant statistics. Last error: {error}"
+      "description": "Astra returned an empty, malformed, or incomplete payload. This can be provider-side rate limiting or IP filtering and does not necessarily mean the password is wrong. Astra Energy withheld cumulative energy sensors to avoid invalid Home Assistant statistics. Last error: {error}"
     },
     "api_unavailable": {
       "title": "Astra Energy update failed",

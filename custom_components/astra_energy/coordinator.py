@@ -266,8 +266,10 @@ class AstraEnergyCoordinator(DataUpdateCoordinator[dict[str, AstraMeterReading]]
                 notification_title="Astra Energy data deferred",
                 notification_message=(
                     "Astra returned an empty, malformed, or incomplete payload. "
-                    "Astra Energy is withholding cumulative energy sensors so "
-                    "Home Assistant does not record invalid statistics. Last "
+                    "This can be provider-side rate limiting or IP filtering and "
+                    "does not necessarily mean the password is wrong. Astra "
+                    "Energy is withholding cumulative energy sensors so Home "
+                    "Assistant does not record invalid statistics. Last "
                     f"error: {type(err).__name__}: {err}"
                 ),
             )

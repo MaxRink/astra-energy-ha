@@ -288,7 +288,9 @@ def _checksum_verified_body(text: str) -> str:
             _LOGGER.debug("Astra accepted unsuffixed JSON response")
             return text
     if len(text) < 32:
-        raise AstraDeferredDataError("Astra response is too short")
+        raise AstraDeferredDataError(
+            "Astra response is too short (empty or truncated provider response)"
+        )
     body = text[:-32]
     checksum = text[-32:]
     if not _looks_like_md5(checksum):
@@ -1426,6 +1428,10 @@ class AstraClient:
         self._monthly_metrics_cache: dict[
             tuple[int, int], tuple[datetime, dict[str, float]]
         ] = {}
+        # `auth_login` returns the current overview rows alongside the login
+        # metadata.  Reuse them for the first refresh so startup does not
+        # immediately issue a redundant `get_mtr_vb_overview` request.
+        self._login_overview: dict[str, Any] | None = None
         # The provider requires a fresh timestamp/checksum pair for every
         # action.  Serialize the timestamp + action pair so overlapping HA
         # refresh/backfill tasks cannot race the provider session or create a
@@ -1527,6 +1533,7 @@ class AstraClient:
 
     async def async_login(self) -> None:  # pragma: no cover
         """Authenticate through the Android JSON endpoint."""
+        self._login_overview = None
         payload = await self._post_action(
             "auth_login",
             s_sid=self._sid,
@@ -1558,6 +1565,11 @@ class AstraClient:
         if auth_status is not True:
             raise AstraProtocolError("Astra login response has no valid auth status")
         self._location_id = str(data.get("immo_sel") or self._location_id)
+        login_rows = data.get("data")
+        if isinstance(login_rows, list):
+            self._login_overview = {"data": login_rows}
+        elif isinstance(login_rows, dict):
+            self._login_overview = login_rows
         self._authenticated = True
 
     async def _get_json(self, action: str, **overrides: str) -> dict[str, Any]:  # pragma: no cover
@@ -1669,6 +1681,9 @@ class AstraClient:
                 monthly_values=monthly_values,
             )
             return readings
+        # No meter row means the login overview was not consumed.  Do not let
+        # it leak into a later refresh as if it were fresh.
+        self._login_overview = None
         return [
             self._reading_with_metrics(reading)
             for reading in await self._read_overview_values()
@@ -2096,6 +2111,13 @@ class AstraClient:
 
     async def _read_overview_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-year overview metrics from Astra."""
+        login_overview = self._login_overview
+        if login_overview is not None:
+            # The login payload is only valid for the request defaults that
+            # produced it (year/month/date).  Consume it once; later refreshes
+            # must ask the dedicated endpoint again.
+            self._login_overview = None
+            return _overview_metrics_from_payload(login_overview)
         try:
             data = await self._get_json("get_mtr_vb_overview")
         except AstraApiError:

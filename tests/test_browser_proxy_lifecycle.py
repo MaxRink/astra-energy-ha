@@ -109,6 +109,56 @@ def test_history_reasserts_date_range_after_merging_stale_route() -> None:
     assert query["s_height"] == ["600"]
 
 
+def test_login_autofill_submits_astra_image_button() -> None:
+    class FakeLocator:
+        def __init__(self, page, selector):
+            self.page = page
+            self.selector = selector
+            self.first = self
+
+        def count(self):
+            return 1 if self.selector in self.page.available else 0
+
+        def fill(self, value, timeout):
+            self.page.calls.append(("fill", self.selector, value))
+
+        def click(self, timeout):
+            self.page.calls.append(("click", self.selector))
+
+    class FakePage:
+        available = {
+            "#UserName",
+            "input[name='UserName']",
+            "input[type='text']",
+            "#Password",
+            "input[name='Password']",
+            "input[type='password']",
+            "input[type='image']",
+        }
+
+        def __init__(self):
+            self.calls = []
+            self.waited = []
+
+        def locator(self, selector):
+            return FakeLocator(self, selector)
+
+        def wait_for_load_state(self, state, timeout):
+            self.waited.append(state)
+
+    page = FakePage()
+    session = app.AstraBrowserSession(
+        app.ProxyConfig(username="user@example.test", password="secret")
+    )
+
+    session._fill_best_effort_login(page)
+
+    assert ("fill", "#UserName", "user@example.test") in page.calls
+    assert ("fill", "#Password", "secret") in page.calls
+    assert ("click", "input[type='image']") in page.calls
+    assert page.waited == ["domcontentloaded"]
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 

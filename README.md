@@ -11,6 +11,37 @@ This repository is intentionally split into two tracks:
 
 Raw captures are ignored by git because they may contain credentials, cookies, tokens, meter identifiers, and private consumption data.
 
+## Login and Provider Changes
+
+Astra Cockpit's mobile API still uses the documented signed Android/iOS form
+protocol, but the **login identity is the full email address** registered with
+Astra Cockpit, not the short tenant name or a meter number. It is
+case-sensitive. The password is passed unchanged into
+`md5(email + md5(password))` to build `s_sid`.
+
+The live recheck on 2026-11-01 found three important behaviors:
+
+- `auth_login` now also returns a `data[]` overview block, so the integration
+  can reuse the current-year metrics from the login response before falling
+  back to `get_mtr_vb_overview`.
+- `get_ts` and all other mobile actions can return **HTTP 200 with an empty
+  body**. In the same test the same account and password worked from a
+  different egress IP. Treat this as provider-side deferral, rate limiting or
+  IP filtering, not automatically as a wrong password. Home Assistant backs
+  off, keeps the last safe values and can use the browser fallback.
+- The browser portal still requires reCAPTCHA v3 on
+  `csloginw.php`, `csloginem.php` and `csloginiv.php`. The browser-proxy
+  autofill now targets the current `#UserName` / `#Password` fields and clicks
+  the image submit control; an interactive browser is still required when
+  Astra challenges the reCAPTCHA.
+
+If Astra reports invalid credentials, open **Settings → Devices & services →
+Astra Energy → Reauthenticate** and enter the full email address and current
+password. Do not enter only the part before `@`.
+
+See [docs/api-live-2026-11-01.md](docs/api-live-2026-11-01.md) for the complete
+live action catalogue, field tables and synthetic payloads.
+
 ## Local Protocol Probe
 
 The integration uses the Android JSON endpoint discovered from the APK. You can

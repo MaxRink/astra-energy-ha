@@ -1,5 +1,12 @@
 # Astra API Notes
 
+> **Live recheck 2026-11-01:** the mobile signed form protocol is still in use.
+> `auth_login` now also returns a `data[]` overview block, `get_mtr_lzs.v04` is
+> the consumption for the selected period (not an interval delta), and an empty
+> HTTP 200 is provider-side deferral/IP filtering rather than a bad password.
+> See [api-live-2026-11-01.md](api-live-2026-11-01.md) for the full live
+> catalogue, schemas and synthetic examples.
+
 ## Confirmed Android API Surface
 
 The Android app (`de.astra_software.astracockpit`) is a native client, not a
@@ -30,8 +37,15 @@ Each action is signed with a timestamp fetched from the same endpoint:
 
 Login/session id:
 
-- `s_sid=md5(username + md5(password))`
+- `s_sid=md5(email + md5(password))`
+- The login identity is the full email address registered with Astra Cockpit.
+  It is case-sensitive; a short tenant name, an upper-cased address and an
+  address with trailing whitespace were all rejected in the 2026-11-01
+  recheck.
 - The app stores this value locally and reuses it for session restore.
+- `auth_login` also returns `data[]` with the current six overview rows. The
+  integration consumes them once for the first refresh and then calls
+  `get_mtr_vb_overview`.
 
 ### Common Parameters
 
@@ -39,7 +53,8 @@ Login/session id:
 - `s_immo`: selected location/property id, initially `-1`, then `immo_sel` from
   login. Observed IDs are hierarchical strings:
   - `3^...`: branch/site tree root.
-  - `4^...`: building/project level. The active account selected `4^263`.
+  - `4^...`: building/project level. The active account selected a `4^...`
+    entry; the exact id is intentionally not documented.
   - `5^...`: tenant/apartment level.
   - `-1`: section separators in `standort_list`.
 - `s_year`: selected year.
@@ -79,7 +94,10 @@ The only exception found in the APK is `get_mtr_inv_pdf`, which uses
 `auth_login`:
 
 - Top-level: `auth`, `comp_id`, `comp_name`, `user`, `auft`, `immo_sel`,
-  `is_mieter`, `is_t1t2`, `med_list`, `standort_list`.
+  `is_mieter`, `is_t1t2`, `med_list`, `standort_list`, `data`.
+- `data[]`: the current six overview rows, with the same `v01`/`v02`/`v03`
+  shape as `get_mtr_vb_overview`. The integration consumes them once for the
+  first refresh and then uses the dedicated endpoint.
 - `med_list[]`: `id`, `name`, `img`.
 - `standort_list[]`: `id`, `name`, `country`.
 - Selected captures contain 447 `standort_list` entries: 1 root-like `3^...`
@@ -93,8 +111,11 @@ The only exception found in the APK is `get_mtr_inv_pdf`, which uses
 
 - Top-level: `auth`, `data`.
 - `data[]`: `v01`, `v02`, `v03`, `v04`, `v05`, `v06`, `v07`.
-- App semantics from parser: label, current meter value, unit, interval
-  consumption, date, medium, account/order.
+- Live 2026-11-01 semantics: `v01` meter id/label, `v02` cumulative meter
+  stand, `v03` unit, `v04` consumption for the selected period (current year
+  by default, month with `s_mnt`, day with `s_datum`), `v05` reading date,
+  `v06` channel label, `v07` account/order. `v04` is not a generic interval
+  delta.
 - Live data can contain one physical meter plus `T1` and `T2` channel rows. The
   integration groups those rows into one Home Assistant device:
   - physical/VGB row -> total cumulative energy and device identifier
@@ -170,6 +191,11 @@ The previously working Android endpoint currently returns HTTP 200 with an empty
 body for `get_ts` before credentials are used. This was reproduced against both
 `https://astra-cloud.com/readyxnet/source/login/csandroid.php` and
 `https://astra-cloud.com/astra04/readyxnet/source/login/csandroid.php`.
+
+On 2026-11-01 the same request succeeded from a different egress IP while the
+original residential IP received empty 200 responses. This is provider-side
+deferral/rate limiting/IP filtering, not a credential failure. The integration
+treats it as `AstraDeferredDataError` and backs off.
 
 App-like `User-Agent`, `Accept`, `Origin`, `Referer`, and explicit UTF-8 content
 type headers did not change the empty response. Alternate simple timestamp
@@ -400,7 +426,13 @@ python3 -m pytest -q
 ## Known Public Web Surface
 
 - Base URL observed from the user-provided link: `https://astra-cloud.com/astra04/readyxnet`.
-- Standalone login URL: `https://astra-cloud.com/readyxnet/source/login/csloginw.php`.
+- Standalone login URLs (all share `login.js?v=1.6` and reCAPTCHA):
+  - Cockpit: `https://astra-cloud.com/readyxnet/source/login/csloginw.php`
+    (`g_sys=1`, `strRequestType=Submit`)
+  - Energy Monitoring: `https://astra-cloud.com/readyxnet/source/login/csloginem.php`
+    (`g_sys=2`, `strRequestType=submit_login`)
+  - Inventory: `https://astra-cloud.com/readyxnet/source/login/csloginiv.php`
+    (`g_sys=3`, `strRequestType=submit_login`)
 - Direct `source/pm/pm_customlogin.php` is not standalone; it checks
   `parent.navigation` and redirects to `../common/ErrorPage.php` when loaded
   without the expected frameset context.
@@ -438,7 +470,9 @@ OpenAPI reference: [openapi-web-observed.yaml](openapi-web-observed.yaml).
 
 - `POST /readyxnet/source/login/csloginw.php`: browser login form with
   `UserName`, `Password`, `Email`, `strRequestType=Submit`, and
-  `g-recaptcha-response`.
+  `g-recaptcha-response`. On 2026-11-01 the `Email` input was hidden by CSS and
+  the submit control was `input[type=image]`; browser automation must click the
+  image control or call the page's login function, not just fill the fields.
 - `POST /astra04/readyxnet/source/pm/pm_customlogin.php`: frame/bootstrap page
   after browser login.
 - `POST /astra04/readyxnet/source/pm/ajax.php`: widget RPC endpoint using JSON

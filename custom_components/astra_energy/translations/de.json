@@ -5,16 +5,16 @@
       "reauth_successful": "Erneute Authentifizierung erfolgreich"
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen",
-      "invalid_auth": "Ungültige Zugangsdaten",
+      "cannot_connect": "Astra ist nicht erreichbar. Der Mobile-Endpunkt kann vorübergehend leer sein, rate-limitiert sein oder diese IP blockieren; Home Assistant versucht es erneut.",
+      "invalid_auth": "Astra hat die Zugangsdaten abgelehnt. Vollständige, groß-/kleingeschriebene E-Mail-Adresse und aktuelles Passwort verwenden.",
       "unknown": "Unerwarteter Fehler"
     },
     "step": {
       "user": {
         "title": "Astra Energy",
-        "description": "Astra-Energie-Konto verbinden.",
+        "description": "Astra-Energie-Konto verbinden. Vollständige, bei Astra Cockpit registrierte E-Mail-Adresse verwenden; die Mobile-API unterscheidet Groß- und Kleinschreibung.",
         "data": {
-          "username": "Benutzername",
+          "username": "E-Mail-Adresse",
           "password": "Passwort",
           "base_url": "Basis-URL",
           "poll_interval": "Abfrageintervall",
@@ -40,7 +40,7 @@
           "browser_proxy_token": "Browser-Proxy-Bearer-Token"
         },
         "data_description": {
-          "username": "Astra-Cockpit-Benutzername.",
+          "username": "Vollständige Astra-Cockpit-E-Mail-Adresse, exakt wie registriert (Groß-/Kleinschreibung beachten). Nicht die Mieter- oder Zählernummer.",
           "password": "Astra-Cockpit-Passwort.",
           "base_url": "Android-API-Endpunkt. Standardwert beibehalten, sofern Astra den Server nicht ändert.",
           "poll_interval": "Wie oft Home Assistant aktuelle Zählerstände von Astra abfragt. Standardwert: 3600 Sekunden / 1 Stunde.",
@@ -68,17 +68,21 @@
       },
       "reauth_confirm": {
         "title": "Astra Energy erneut authentifizieren",
-        "description": "Astra-Zugangsdaten aktualisieren.",
+        "description": "Astra-E-Mail-Adresse und Passwort aktualisieren. Die Mobile-API benötigt die vollständige, groß-/kleingeschriebene E-Mail-Adresse.",
         "data": {
-          "username": "Benutzername",
+          "username": "E-Mail-Adresse",
           "password": "Passwort"
+        },
+        "data_description": {
+          "username": "Vollständige Astra-Cockpit-E-Mail-Adresse, exakt wie registriert.",
+          "password": "Aktuelles Astra-Cockpit-Passwort."
         }
       },
       "reconfigure": {
         "title": "Astra Energy neu konfigurieren",
         "description": "Astra-Verbindungseinstellungen aktualisieren.",
         "data": {
-          "username": "Benutzername",
+          "username": "E-Mail-Adresse",
           "password": "Passwort",
           "base_url": "Basis-URL",
           "poll_interval": "Abfrageintervall",
@@ -196,7 +200,7 @@
     },
     "api_deferred": {
       "title": "Astra-Energy-Daten zurückgestellt",
-      "description": "Astra hat eine leere, fehlerhafte oder unvollständige Antwort geliefert. Astra Energy hat kumulative Energie-Sensoren zurückgehalten, damit Home Assistant keine ungültigen Statistiken speichert. Letzter Fehler: {error}"
+      "description": "Astra hat eine leere, fehlerhafte oder unvollständige Antwort geliefert. Das kann eine provider-seitige Ratenbegrenzung oder IP-Filterung sein und bedeutet nicht zwingend falsche Zugangsdaten. Astra Energy hat kumulative Energie-Sensoren zurückgehalten, damit Home Assistant keine ungültigen Statistiken speichert. Letzter Fehler: {error}"
     },
     "api_unavailable": {
       "title": "Astra-Energy-Aktualisierung fehlgeschlagen",

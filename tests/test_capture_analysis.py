@@ -5376,6 +5376,84 @@ def test_post_action_preserves_auth_rejection_over_later_endpoint_failure() -> N
     assert client._authenticated is False
 
 
+def test_login_stores_overview_rows_and_clears_them_on_failure() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+
+    async def login_ok(*_args, **_kwargs):
+        return json.dumps(
+            {
+                "auth": "1",
+                "immo_sel": "4^1",
+                "data": [
+                    {
+                        "v01": "str_mtr_vbo_vb_strom_gesbez",
+                        "v02": "10.5",
+                        "v03": "kWh",
+                    }
+                ],
+            }
+        )
+
+    client._post_action = login_ok
+    asyncio.run(client.async_login())
+    assert client._login_overview == {
+        "data": [
+            {
+                "v01": "str_mtr_vbo_vb_strom_gesbez",
+                "v02": "10.5",
+                "v03": "kWh",
+            }
+        ]
+    }
+
+    async def login_failed(*_args, **_kwargs):
+        return json.dumps({"auth": "0"})
+
+    client._post_action = login_failed
+    with pytest.raises(astra_api.AstraInvalidCredentialsError):
+        asyncio.run(client.async_login())
+    assert client._login_overview is None
+
+
+def test_login_overview_rows_are_consumed_once() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._login_overview = {
+        "data": [
+            {"v01": "str_mtr_vbo_vb_strom_gesbez", "v02": "12.5", "v03": "kWh"},
+            {"v01": "str_mtr_vbo_strom_t2", "v02": "2.5", "v03": "kWh"},
+            {"v01": "str_mtr_vbo_autarkiegrad", "v02": "20", "v03": "%"},
+        ]
+    }
+    calls: list[str] = []
+
+    async def fake_get_json(action, **_overrides):
+        calls.append(action)
+        return {"data": []}
+
+    client._get_json = fake_get_json
+
+    metrics = asyncio.run(client._read_overview_metrics())
+    assert calls == []
+    assert metrics["current_year_total_kwh"] == 12.5
+    assert metrics["current_year_solar_kwh"] == 2.5
+    assert metrics["current_year_grid_kwh"] == 10.0
+    assert metrics["autarky_percent"] == 20.0
+    assert client._login_overview is None
+
+    assert asyncio.run(client._read_overview_metrics()) == {}
+    assert calls == ["get_mtr_vb_overview"]
+
+
 def test_login_reports_protocol_and_auth_errors() -> None:
     protocol_client = astra_api.AstraClient(
         object(),

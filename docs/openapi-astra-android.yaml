@@ -11,12 +11,16 @@ info:
     Local iOS/macOS wrapper app analyzed:
     `/Applications/astracockpit.app`, bundle version 1.3.
 
-    Recheck on 2026-06-21: the endpoint returned HTTP 200 with an empty body for
-    unauthenticated `get_ts`, before credentials were used. This may indicate
-    temporary backend behavior, backend filtering, or a mobile protocol change.
-    The installed iOS app uses the same signed form protocol but points at
-    `/readyxnet/source/login/csios.php`, which also returned an empty body for
-    `get_ts` in the same recheck.
+    Live recheck on 2026-11-01: the signed form protocol is unchanged. The
+    login identity is the full, case-sensitive Astra Cockpit email address.
+    `s_sid = md5(email + md5(password))`. `auth_login` also returns a `data[]`
+    overview block. An HTTP 200 with an empty body was observed from one
+    residential egress IP while the same account and credentials worked from a
+    different egress IP; treat that as provider-side deferral/rate limiting/IP
+    filtering, not invalid credentials.
+
+    The installed iOS app uses the same signed form protocol and points at
+    `/readyxnet/source/login/csios.php`.
 servers:
   - url: https://astra-cloud.com
 paths:
@@ -213,6 +217,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Location"
+        data:
+          type: array
+          description: |
+            Current overview rows, same shape and metric keys as
+            `get_mtr_vb_overview`. Observed as six rows on 2026-11-01.
+          items:
+            $ref: "#/components/schemas/OverviewRow"
     Medium:
       type: object
       properties:
@@ -248,22 +259,25 @@ components:
       properties:
         v01:
           type: string
-          description: Meter label.
+          description: Meter identifier/label, e.g. `<meter-id>/0` or `ZT1_<id>/0`.
         v02:
           type: string
-          description: Current/cumulative meter value.
+          description: Cumulative meter stand in `v03`; lifetime counter including prior years.
         v03:
           type: string
-          description: Unit, e.g. kWh.
+          description: Unit, normally `kWh`.
         v04:
           type: string
-          description: Interval consumption.
+          description: |
+            Consumption for the selected period: current year by default,
+            month with `s_mnt`, or day with `s_datum`. Not a generic interval
+            delta.
         v05:
           type: string
-          description: Reading date/time.
+          description: Reading date, provider-local `DD.MM.YYYY`.
         v06:
           type: string
-          description: Medium.
+          description: Channel label, e.g. `Strom VGB`, `Strom T1 (Netzbezug)`, `Strom T2 (Objektbezug)`.
         v07:
           type: string
           description: Account/order label.
@@ -279,50 +293,90 @@ components:
           items:
             type: object
             properties:
+              _lvb_lbl:
+                type: string
+                description: |
+                  12 comma-separated month labels (`Jan`...`Dez`) for a
+                  monthly request, or 24 hourly labels (`01:00`...`00:00`) for
+                  a daily request.
               _lvb_lbl_14h:
                 type: string
-                description: 96 comma-separated quarter-hour labels.
+                description: 96 comma-separated provider-local interval-end labels (`00:15`...`00:00`) for a daily request.
               _lvb_ttl:
                 type: string
                 description: Series names, e.g. Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug.
+              _lvb_vll:
+                type: string
+                description: |
+                  Semicolon-separated channel series matching `_lvb_ttl`.
+                  Monthly requests contain 12 values per channel; daily
+                  requests contain 24 hourly values per channel.
               _lvb_vll_14h:
                 type: string
-                description: Semicolon-separated quarter-hour interval-kWh series matching `_lvb_ttl`.
+                description: Semicolon-separated 96-value quarter-hour interval-kWh series matching `_lvb_ttl`.
+              _lvb_clr:
+                type: string
+                description: Comma-separated chart colors matching `_lvb_ttl`.
               _lvb_eh:
                 type: string
                 example: kWh
-              _lez_ttl:
+              _vb_ttl:
                 type: string
-                description: PV delivery series labels, e.g. PV-Gesamtlieferung,PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung.
-              _lez_vll:
+                description: Grid/object/battery channel labels, e.g. Netzbezug,Objektbezug,Batterie-Bezug.
+              _vb_vll:
                 type: string
-                description: Semicolon-separated monthly PV delivery values matching `_lez_ttl`.
-              _ez_ttl:
+                description: Semicolon-separated monthly/hourly series matching `_vb_ttl`.
+              _vb_vll_14h:
                 type: string
-                description: PV feed/battery/object delivery labels.
-              _ez_vll:
-                type: string
-                description: Semicolon-separated monthly PV feed/battery/object delivery values.
+                description: Semicolon-separated 96-value quarter-hour series matching `_vb_ttl`.
               _vbt2r_ttl:
                 type: string
                 description: Tariff split labels, e.g. Netzbezug,Objektbezug.
               _vbt2r_vll:
                 type: string
-                description: Semicolon-separated tariff split values matching `_vbt2r_ttl`.
+                description: Semicolon-separated monthly/hourly tariff split values matching `_vbt2r_ttl`.
+              _vbt2r_vll_14h:
+                type: string
+                description: Semicolon-separated 96-value quarter-hour tariff split values.
               _lt2rvb_ttl:
                 type: string
                 description: Tariff split labels, e.g. Gesamtbezug,Netzbezug,Objektbezug.
               _lt2rvb_vll:
                 type: string
-                description: Semicolon-separated tariff split values matching `_lt2rvb_ttl`.
+                description: Semicolon-separated monthly/hourly tariff split values matching `_lt2rvb_ttl`.
+              _lt2rvb_vll_14h:
+                type: string
+                description: Semicolon-separated 96-value quarter-hour tariff split values.
+              _ez_ttl:
+                type: string
+                description: PV feed/battery/object delivery labels.
+              _ez_vll:
+                type: string
+                description: Semicolon-separated monthly/hourly PV feed/battery/object delivery values.
+              _ez_vll_14h:
+                type: string
+                description: Semicolon-separated 96-value quarter-hour PV delivery values.
+              _lez_ttl:
+                type: string
+                description: PV delivery series labels, e.g. PV-Gesamtlieferung,PV-Netzlieferung,Batterie-Ladung,PV-Objektlieferung.
+              _lez_vll:
+                type: string
+                description: Semicolon-separated monthly/hourly PV delivery values matching `_lez_ttl`.
+              _lez_vll_14h:
+                type: string
+                description: Semicolon-separated 96-value quarter-hour PV delivery values.
+              _vb_lbl:
+                type: string
+                description: Monthly or hourly labels for the combined consumption chart.
               _vb_lbl_14h:
                 type: string
                 description: 96 provider-local quarter-hour labels for the combined consumption chart.
               _vb_vll_14h:
                 type: string
                 description: Semicolon-separated provider-local quarter-hour values for the combined consumption chart.
-    OverviewPayload:
+    AutarkyPayload:
       type: object
+      description: Observed `get_mtr_autarkie` payload.
       properties:
         auth:
           type: string
@@ -331,12 +385,176 @@ components:
           items:
             type: object
             properties:
-              v01:
+              _lvb_ttl:
                 type: string
-              v02:
+                example: Netzbezug,PV-Bezug,Batterie-Bezug
+              _lvb_vll:
                 type: string
-              v03:
+                description: Three comma-separated kWh values for the selected period.
+              _lvb_eh:
                 type: string
+                example: kWh
+              _lvb_clr:
+                type: string
+    HistoryPayload:
+      type: object
+      description: Observed `get_mtr_hist` payload.
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              _lvb_ttl:
+                type: string
+                description: Gesamt,Sommer (April - September),Winter (Oktober - März),Wochentage,Wochenenden
+              _lvb_vll:
+                type: string
+                description: Five comma-separated 24-value hourly profiles.
+              _lvb_lbl:
+                type: string
+                description: 24 hourly labels.
+              _lvb_eh:
+                type: string
+              _lvb_clr:
+                type: string
+    MonthlyMediumPayload:
+      type: object
+      description: Observed `get_mtr_vbmed` payload.
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              _hvb_ttl:
+                type: string
+                description: Gesamtbezug,Netzbezug,Objektbezug,PV-Bezug,Batterie-Bezug
+              _hvb_vll:
+                type: string
+                description: Semicolon-separated channel series; 12 monthly, 24 hourly or 96 quarter-hour values per channel.
+              _hvb_vll_14h:
+                type: string
+                description: Semicolon-separated 96-value quarter-hour series.
+              _hvbt2r_ttl:
+                type: string
+                description: Gesamtbezug,Netzbezug,Objektbezug
+              _hvbt2r_vll:
+                type: string
+                description: Semicolon-separated tariff split series.
+              _hvbt2r_vll_14h:
+                type: string
+                description: Semicolon-separated quarter-hour tariff split series.
+              _hvbc_ttl:
+                type: string
+                description: Netzbezug,Objektbezug,Batterie-Bezug; observed zero for the tenant account.
+              _hvbc_vll:
+                type: string
+              _hvbct2r_ttl:
+                type: string
+                description: Netzbezug,Objektbezug; observed zero for the tenant account.
+              _hvbct2r_vll:
+                type: string
+              _vb_ttl:
+                type: string
+              _vb_vll:
+                type: string
+              _hvb_eh:
+                type: string
+              _hvb_clr:
+                type: string
+    NonTenantConsumptionPayload:
+      type: object
+      description: Observed `get_verbrauch` payload.
+      properties:
+        auth:
+          type: string
+        vb_eh:
+          type: string
+        vb_leg:
+          type: array
+          items:
+            type: object
+            properties:
+              LJ:
+                type: string
+              VJ:
+                type: string
+        vb_ly:
+          type: array
+          description: One object with `v01`...`v12` previous-year monthly values.
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        vb_vy:
+          type: array
+          description: One object with `v01`...`v12` current-year monthly values.
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        vb_x:
+          type: array
+          description: One object with `v01`...`v12` month numbers.
+          items:
+            type: object
+            additionalProperties:
+              type: integer
+    InvoiceRow:
+      type: object
+      description: |
+        Observed `get_mtr_inv` row. `DOCS` is encoded as
+        `key=value;key=value:...`; the `url` value is the `s_id` handle for
+        `get_mtr_inv_pdf`.
+      properties:
+        TITEL:
+          type: string
+        DATUM:
+          type: string
+        SUM:
+          type: string
+          example: 199,77 EUR
+        DOCS:
+          type: string
+          description: |
+            Colon-separated documents; each document is semicolon-separated
+            key/value pairs. Observed keys: Nummer, Datum, Betrag, Fälligkeit,
+            bezahlt am, url.
+    OverviewRow:
+      type: object
+      description: |
+        One `get_mtr_vb_overview` / `auth_login.data` row. `v01` is a stable
+        metric key, `v02` the formatted numeric value and `v03` the unit.
+      properties:
+        v01:
+          type: string
+          enum:
+            - str_mtr_vbo_vb_strom_gesbez
+            - str_mtr_vbo_vb_strom_t1
+            - str_mtr_vbo_strom_t2
+            - str_mtr_vbo_vb_strom_pv
+            - str_mtr_vbo_vmco_strom_pv
+            - str_mtr_vbo_autarkiegrad
+        v02:
+          type: string
+          description: Formatted number; parse with decimal point/comma handling.
+        v03:
+          type: string
+          example: kWh
+    OverviewPayload:
+      type: object
+      properties:
+        auth:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewRow"
     ConsumptionSeriesPayload:
       type: object
       properties:
@@ -365,17 +583,7 @@ components:
         data:
           type: array
           items:
-            type: object
-            properties:
-              DATUM:
-                type: string
-              SUM:
-                type: string
-              TITEL:
-                type: string
-              DOCS:
-                type: string
-                description: Colon-separated documents, semicolon fields.
+            $ref: "#/components/schemas/InvoiceRow"
     InvoicePdfPayload:
       type: object
       properties:
@@ -388,8 +596,10 @@ components:
             properties:
               pdfUri:
                 type: string
+                description: Document path segment.
               alias:
                 type: string
+                description: Tenant alias used in `https://astra-cloud.com/{alias}/readyxnet/source/userdocs/{pdfUri}`.
     MediumListPayload:
       type: object
       properties:
