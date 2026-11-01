@@ -518,7 +518,7 @@ components:
           type: string
         SUM:
           type: string
-          example: 199,77 EUR
+          example: 123,45 EUR
         DOCS:
           type: string
           description: |
