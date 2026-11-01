@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_MAX_INTERVAL_AVERAGE_KW,
     DEFAULT_MOBILE_BASE_URLS,
     DEFAULT_MONTHLY_METRICS_CACHE_HOURS,
+    DEFAULT_OVERVIEW_METRICS_CACHE_HOURS,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_SMOOTH_INTERVAL_ANOMALIES,
     DEFAULT_SMOOTHING_LOOKAROUND_DAYS,
@@ -1428,6 +1429,10 @@ class AstraClient:
         self._monthly_metrics_cache: dict[
             tuple[int, int], tuple[datetime, dict[str, float]]
         ] = {}
+        # Current-year overview values only change at the provider's daily
+        # aggregation cadence.  Cache them briefly so an hourly poll does not
+        # issue the same slow request every time.
+        self._overview_metrics_cache: tuple[int, datetime, dict[str, float]] | None = None
         # `auth_login` returns the current overview rows alongside the login
         # metadata.  Reuse them for the first refresh so startup does not
         # immediately issue a redundant `get_mtr_vb_overview` request.
@@ -1534,6 +1539,7 @@ class AstraClient:
     async def async_login(self) -> None:  # pragma: no cover
         """Authenticate through the Android JSON endpoint."""
         self._login_overview = None
+        self._overview_metrics_cache = None
         payload = await self._post_action(
             "auth_login",
             s_sid=self._sid,
@@ -1631,11 +1637,16 @@ class AstraClient:
             await self.async_login()
         readings = await self._read_latest_meter_stands()
         if readings:
-            balance_values = await self._read_energy_balance_values()
             overview_values = await self._read_overview_metrics()
             monthly_values = await self._read_monthly_metrics()
+            first = readings[0]
+            # `get_mtr_lzs` already exposes cumulative total, T1 and T2
+            # counters.  The energy-balance card is only a fallback for
+            # accounts whose meter-stand rows omit one of those channels.
+            balance_values = {}
+            if first.solar_kwh_total is None or first.raw_grid_kwh_total is None:
+                balance_values = await self._read_energy_balance_values()
             if balance_values:
-                first = readings[0]
                 readings[0] = replace(
                     first,
                     grid_kwh_total=(
@@ -2111,18 +2122,35 @@ class AstraClient:
 
     async def _read_overview_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-year overview metrics from Astra."""
+        now = datetime.now(ASTRA_TIME_ZONE)
+        cached = self._overview_metrics_cache
+        if cached is not None:
+            cached_year, fetched_at, values = cached
+            if (
+                cached_year == now.year
+                and now - fetched_at
+                < timedelta(hours=DEFAULT_OVERVIEW_METRICS_CACHE_HOURS)
+            ):
+                return dict(values)
         login_overview = self._login_overview
         if login_overview is not None:
             # The login payload is only valid for the request defaults that
-            # produced it (year/month/date).  Consume it once; later refreshes
-            # must ask the dedicated endpoint again.
+            # produced it (year/month/date).  Consume it once and seed the
+            # short cache so the first refresh does not issue a duplicate
+            # `get_mtr_vb_overview` request.
             self._login_overview = None
-            return _overview_metrics_from_payload(login_overview)
+            values = _overview_metrics_from_payload(login_overview)
+            if values:
+                self._overview_metrics_cache = (now.year, now, dict(values))
+            return values
         try:
             data = await self._get_json("get_mtr_vb_overview")
         except AstraApiError:
             return {}
-        return _overview_metrics_from_payload(data)
+        values = _overview_metrics_from_payload(data)
+        if values:
+            self._overview_metrics_cache = (now.year, now, dict(values))
+        return values
 
     async def _read_monthly_metrics(self) -> dict[str, float]:  # pragma: no cover
         """Read current-month medium metrics from Astra."""

@@ -25,6 +25,9 @@ reports/
 *.jks
 *.keystore
 
+# Local HACS release artifacts.
+dist/
+
 # Local Home Assistant/config-test scratch data.
 .storage/
 deps/

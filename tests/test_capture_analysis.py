@@ -5449,9 +5449,97 @@ def test_login_overview_rows_are_consumed_once() -> None:
     assert metrics["current_year_grid_kwh"] == 10.0
     assert metrics["autarky_percent"] == 20.0
     assert client._login_overview is None
+    assert client._overview_metrics_cache is not None
+
+    assert asyncio.run(client._read_overview_metrics()) == metrics
+    assert calls == []
+
+    client._overview_metrics_cache = None
+    assert asyncio.run(client._read_overview_metrics()) == {}
+    assert calls == ["get_mtr_vb_overview"]
+
+
+def test_overview_metrics_cache_expires_at_year_boundary() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._overview_metrics_cache = (
+        2020,
+        dt.datetime.now(dt.UTC),
+        {"current_year_total_kwh": 1.0},
+    )
+    calls: list[str] = []
+
+    async def fake_get_json(action, **_overrides):
+        calls.append(action)
+        return {"data": []}
+
+    client._get_json = fake_get_json
 
     assert asyncio.run(client._read_overview_metrics()) == {}
     assert calls == ["get_mtr_vb_overview"]
+
+
+def test_live_refresh_skips_energy_balance_when_meter_rows_have_split() -> None:
+    client = astra_api.AstraClient(
+        object(),
+        username="user@example.test",
+        password="secret",
+        base_url="https://example.test",
+    )
+    client._authenticated = True
+    calls: list[str] = []
+
+    def reading(*, solar: float | None):
+        return astra_api.AstraMeterReading(
+            meter_id="meter",
+            meter_name="Meter",
+            timestamp=None,
+            power_w=None,
+            imported_kwh_total=100.0,
+            grid_kwh_total=80.0,
+            solar_kwh_total=solar,
+            total_kwh=100.0,
+            raw_grid_kwh_total=80.0,
+        )
+
+    async def latest_stand():
+        calls.append("lzs")
+        return [reading(solar=20.0)]
+
+    async def energy_balance():
+        calls.append("eb")
+        return {}
+
+    async def overview():
+        calls.append("overview")
+        return {}
+
+    async def monthly():
+        calls.append("monthly")
+        return {}
+
+    client._read_latest_meter_stands = latest_stand
+    client._read_energy_balance_values = energy_balance
+    client._read_overview_metrics = overview
+    client._read_monthly_metrics = monthly
+
+    readings = asyncio.run(client.async_get_meters())
+    assert readings[0].solar_kwh_total == 20.0
+    assert calls == ["lzs", "overview", "monthly"]
+
+    calls.clear()
+
+    async def latest_stand_without_solar():
+        calls.append("lzs")
+        return [reading(solar=None)]
+
+    client._read_latest_meter_stands = latest_stand_without_solar
+    asyncio.run(client.async_get_meters())
+    assert calls == ["lzs", "overview", "monthly", "eb"]
 
 
 def test_login_reports_protocol_and_auth_errors() -> None:

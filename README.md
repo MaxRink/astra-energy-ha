@@ -42,6 +42,15 @@ password. Do not enter only the part before `@`.
 See [docs/api-live-2026-11-01.md](docs/api-live-2026-11-01.md) for the complete
 live action catalogue, field tables and synthetic payloads.
 
+### Provider Request Budget
+
+A live refresh now needs one `get_mtr_lzs` call (plus the protocol timestamp
+pair). Slow current-year and current-month metrics are cached for six hours,
+and `get_mtr_eb` is only requested when the meter-stand rows are missing the
+T1/T2 split. `auth_login.data` seeds the first overview cache, so startup does
+not make a duplicate overview request. This cuts the normal hourly poll from
+four data actions to one in the steady state.
+
 ## Local Protocol Probe
 
 The integration uses the Android JSON endpoint discovered from the APK. You can
@@ -190,11 +199,12 @@ quarter-hour values, and object/grid split controls. Details are documented in
 ### HACS Installation
 
 This repository is HACS-compatible as a custom integration. The current
-published revision is `v0.1.0-alpha.53`; it accepts fresh, source-authenticated browser recovery from recorder baselines and serializes provider requests per
+published revision is `v0.1.0-alpha.70`; it adds the current browser login
+flow, reuses login overview data, caches slow current-year metrics, and skips
+redundant live energy-balance requests. Provider requests are serialized per
 client so refresh and backfill work cannot create concurrent Astra API bursts.
-For the private
-repository, make sure HACS has GitHub access to `MaxRink/astra-energy-ha`, then
-add it as a custom repository:
+For the private repository, make sure HACS has GitHub access to
+`MaxRink/astra-energy-ha`, then add it as a custom repository:
 
 ```text
 HACS -> Integrations -> Custom repositories
