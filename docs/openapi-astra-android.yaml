@@ -7,7 +7,9 @@ info:
     This is not an official Astra specification. Schemas are based on static
     analysis of `de.astra_software.astracockpit`, the installed iOS app
     `de.astra-software.astracockpit`, and observed web/API behavior.
-    Local Android APK analyzed: versionName 1.0.14, versionCode 16.
+    Local Android APKs analyzed: versionName 1.0.14/versionCode 16 and the
+    current versionName 1.0.15/versionCode 17. The 1.0.15 build adds a PairIP
+    security wrapper but keeps the same HTTP signing and action list.
     Local iOS/macOS wrapper app analyzed:
     `/Applications/astracockpit.app`, bundle version 1.3.
 

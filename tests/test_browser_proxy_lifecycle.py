@@ -159,6 +159,46 @@ def test_login_autofill_submits_astra_image_button() -> None:
     assert page.waited == ["domcontentloaded"]
 
 
+def test_login_waits_for_asynchronous_recaptcha_session() -> None:
+    class FakePage:
+        def __init__(self):
+            self.urls = [
+                "https://astra-cloud.com/readyxnet/source/login/csloginw.php",
+                "https://astra-cloud.com/readyxnet/source/login/csloginw.php",
+                "https://astra-cloud.com/astra04/readyxnet/source/pm/pm_customlogin.php?sessionId=abc",
+            ]
+            self.index = 0
+            self.waits = 0
+
+        @property
+        def url(self):
+            return self.urls[min(self.index, len(self.urls) - 1)]
+
+        def wait_for_timeout(self, _milliseconds):
+            self.waits += 1
+            self.index += 1
+
+    page = FakePage()
+    session = app.AstraBrowserSession(app.ProxyConfig())
+
+    assert session._wait_for_login_session(page) is True
+    assert page.waits == 2
+
+    class LoginPage(FakePage):
+        @property
+        def url(self):
+            return self.urls[0]
+
+    assert session._wait_for_login_session(LoginPage(), timeout_seconds=0) is False
+
+    class BrokenPage:
+        @property
+        def url(self):
+            raise RuntimeError("closed page")
+
+    assert session._wait_for_login_session(BrokenPage()) is False
+
+
 def test_login_converts_navigation_failure_to_safe_proxy_error() -> None:
     session = app.AstraBrowserSession(app.ProxyConfig())
 

@@ -185,6 +185,13 @@ class AstraBrowserSession:
                 LOGGER.warning("Astra login navigation crossed the configured origin; autofill skipped")
             elif self.config.username and self.config.password:
                 self._fill_best_effort_login(page)
+                login_wait_started = perf_counter()
+                waited = self._wait_for_login_session(page)
+                LOGGER.info(
+                    "phase=login_session_wait elapsed_ms=%.1f has_session=%s",
+                    (perf_counter() - login_wait_started) * 1000,
+                    waited,
+                )
             self._capture_browser_session()
             self._last_session_capture_at = monotonic()
             return {
@@ -604,6 +611,28 @@ class AstraBrowserSession:
                 continue
             except OSError as err:
                 LOGGER.warning("Could not clear Astra profile lock: %s", type(err).__name__)
+
+    def _wait_for_login_session(self, page, timeout_seconds: int = 20) -> bool:
+        """Wait for Astra's asynchronous reCAPTCHA callback to finish login.
+
+        The visible form click only starts ``grecaptcha.execute``.  The page
+        submits itself in a callback, so capturing cookies immediately after
+        the click reports a false negative even when the login succeeds.
+        """
+        deadline = monotonic() + timeout_seconds
+        while monotonic() < deadline:
+            try:
+                url = str(page.url)
+            except Exception:  # noqa: BLE001
+                return False
+            lowered = url.casefold()
+            if "sessionid=" in lowered and "/source/login/" not in lowered:
+                return True
+            try:
+                page.wait_for_timeout(500)
+            except Exception:  # noqa: BLE001
+                return False
+        return False
 
     def _fill_best_effort_login(self, page) -> None:
         # The Astra Cockpit login form uses ``UserName`` and ``Password``

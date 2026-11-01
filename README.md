@@ -129,8 +129,11 @@ malformed graph data.
 
 When the mobile API is deferred and web login is blocked by reCAPTCHA, the
 integration can use the local persistent-browser sidecar in
-`tools/astra_browser_proxy`. The sidecar keeps a browser profile and exposes a
-small local JSON API. Configure its base URL in the integration options under
+`tools/astra_browser_proxy`. The sidecar is built on CloakBrowser's stealth
+Chromium; in the 2026-11-01 test it completed the reCAPTCHA v3 login while
+standard headed and headless Chrome/Playwright did not. It keeps a browser
+profile and exposes a small local JSON API. Configure its base URL in the
+integration options under
 `browser_proxy_url`; options changes reload the integration automatically. Live
 cumulative values from this fallback are still checked against the last safe
 Home Assistant baseline, and large catch-up gaps are withheld instead of being
@@ -163,6 +166,14 @@ adb pull <package-path> captures/android/apks/base.apk
 jadx -d captures/android/jadx/base captures/android/apks/base.apk
 apktool d -f -o captures/android/apktool/base captures/android/apks/base.apk
 ```
+
+The current Play Store build is **1.0.15** (`versionCode=17`, target SDK 36).
+It is wrapped by PairIP (`com.pairip.application.Application`), which is the
+likely "security improvements" change in the Play listing. The PairIP wrapper
+does not change the network protocol: `Http.java`, `Md5.java`,
+`MainActivity.UserLoginTask` and the action list still match 1.0.14. The APK
+was pulled from an attached Pixel over ADB and is kept only under the
+gitignored `captures/` directory.
 
 The iOS app is installed locally as `/Applications/astracockpit.app`. Static
 analysis of its wrapped binary confirms a native Swift app, not a WebView, and

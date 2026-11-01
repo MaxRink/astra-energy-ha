@@ -4,6 +4,9 @@
 > `auth_login` now also returns a `data[]` overview block, `get_mtr_lzs.v04` is
 > the consumption for the selected period (not an interval delta), and an empty
 > HTTP 200 is provider-side deferral/IP filtering rather than a bad password.
+> The current Android **1.0.15** APK was pulled from an attached device and
+> statically checked: the PairIP security wrapper is new, but the HTTP signing,
+> login calculation and action list are unchanged.
 > See [api-live-2026-11-01.md](api-live-2026-11-01.md) for the full live
 > catalogue, schemas and synthetic examples.
 
@@ -17,8 +20,10 @@ WebView wrapper. Static analysis of the installed APK found the primary API:
 - Every request includes `s_dv=1`.
 - Every response is `<payload><md5(payload)>`; the client must verify the last
   32 characters before parsing the payload.
-- Local APK version analyzed: package `de.astra_software.astracockpit`,
-  `versionName=1.0.14`, `versionCode=16`.
+- Local APK versions analyzed: package `de.astra_software.astracockpit`,
+  `versionName=1.0.14`, `versionCode=16`, and the current
+  `versionName=1.0.15`, `versionCode=17` (PairIP-wrapped, same network
+  protocol).
 
 OpenAPI reference: [openapi-astra-android.yaml](openapi-astra-android.yaml).
 
